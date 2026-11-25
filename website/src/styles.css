@@ -1203,23 +1203,6 @@ button {
   letter-spacing: -0.015em;
   line-height: 1.15;
 }
-.marker {
-  padding: 0 0.08em;
-  background: linear-gradient(
-      transparent 58%,
-      color-mix(in oklch, var(--cyan-400) 70%, transparent) 58%,
-      color-mix(in oklch, var(--cyan-400) 70%, transparent) 90%,
-      transparent 90%
-    )
-    no-repeat;
-  background-size: 0% 100%;
-  animation: marker 1.1s var(--ease-out) 1s forwards;
-}
-@keyframes marker {
-  to {
-    background-size: 100% 100%;
-  }
-}
 .hero__pitch {
   margin-top: 1.2rem;
   max-width: 34rem;
@@ -3725,8 +3708,5 @@ button {
   .shape,
   .tilt {
     transform: none !important;
-  }
-  .marker {
-    background-size: 100% 100%;
   }
 }
