@@ -30,7 +30,9 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: website/package-lock.json
-      - run: npm ci
+      # npm install, not npm ci: the lockfile is generated on Windows, and npm leaves
+      # out deps of other platforms' optional packages, which makes npm ci fail on Linux.
+      - run: npm install --no-audit --no-fund
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
