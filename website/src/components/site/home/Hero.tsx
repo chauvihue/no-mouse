@@ -22,7 +22,7 @@ export function Hero() {
             NoMouse
           </Reveal>
           <Reveal as="p" index={2} className="hero__tagline">
-            Your <span className="marker">hand</span> is the mouse.
+            Your hand is the mouse.
           </Reveal>
           <Reveal as="p" index={3} className="hero__pitch">
             {site.pitch}
