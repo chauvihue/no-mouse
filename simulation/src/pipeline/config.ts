@@ -10,6 +10,7 @@ export const isAccelOnly = (m: FusionMode): boolean => m === 'accel-complementar
 export type MotionModel = 'integrate' | 'stroke' | 'segment';
 export type SegLive = 'raw' | 'stroke';
 export type ClassifierKind = 'logistic' | 'centroid';
+export type SegRestTest = 'spread' | 'slide' | 'spread+slide';
 
 export interface PipelineConfig {
   sampleRateHz: number;
@@ -33,6 +34,7 @@ export interface PipelineConfig {
 
   // 1. Calibration
   calibrationMs: number;
+  calibSkipMs: number;          // first this long after start is ignored by calibration (sensor start-up transient; 0 = off)
   biasTracking: boolean;        // keep refining gyro bias whenever the hand is still
   biasTrackingTauS: number;
 
@@ -104,6 +106,9 @@ export interface PipelineConfig {
   segMaxS: number;              // longer segments are cut WITHOUT correction (live position kept), then restart
   segLive: SegLive;             // what moves the cursor during a segment: raw integration, or the stroke tracker
   segIncludeHold: boolean;      // detrend over the rest-hold samples too (false: stop at the start of the hold)
+  segRestTest: SegRestTest;     // what counts as rest: gyro + accel spread (default), gyro + no sliding (desk vibration), or all three
+  segDriftAccelK: number;       // end-of-segment velocity correction weighted by (1 + K·|a|), K per (m/s²); 0 = linear in time (default)
+  segDriftVibK: number;         // …and by (1 + K·vibration RMS), K per mg; 0 = off (default)
   velocityDecayPerS: number;    // v ← v·exp(−rate·dt)
 
   // 5b. Stroke tracker (motionModel 'stroke'): speed-up → slow-down → halt, see stroke.ts
@@ -115,6 +120,7 @@ export interface PipelineConfig {
   strokeEndSpeedFrac: number;   // …with the speed below this fraction of the stroke's top speed
   strokeCruiseMs: number;       // pushed, then neither pushing nor braking for this long: stopped
   strokeGlideMaxMs: number;     // …or this long if the sliding detector says the hand is still sliding
+  strokeGlideHoldMs: number;    // a sliding-detector dropout shorter than this still counts as sliding for the glide (0 = off)
   strokeSettleMs: number;       // after a halt, this long of quiet before the next stroke can start
   strokeMaxSpeedupMs: number;   // speeding up longer than this isn't a hand stroke (a tilt): undo it
   strokeRestTauS: number;       // time constant for learning the at-rest acceleration
@@ -167,6 +173,7 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   enableTaps: true,
 
   calibrationMs: 1000,
+  calibSkipMs: 0,
   biasTracking: true,
   biasTrackingTauS: 10,
 
@@ -220,6 +227,9 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   segMaxS: 4,
   segLive: 'stroke',
   segIncludeHold: false,
+  segRestTest: 'spread',
+  segDriftAccelK: 0,
+  segDriftVibK: 0,
 
   strokeOnsetG: 0.006,
   strokeOnsetMs: 10,
@@ -229,6 +239,7 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   strokeEndSpeedFrac: 1,
   strokeCruiseMs: 120,
   strokeGlideMaxMs: 1500,
+  strokeGlideHoldMs: 0,
   strokeSettleMs: 40,
   strokeMaxSpeedupMs: 600,
   strokeRestTauS: 0.5,

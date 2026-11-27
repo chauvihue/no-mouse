@@ -35,6 +35,7 @@ export interface StrokeConfig {
   strokeEndSpeedFrac: number; // …with the speed below this fraction of the stroke's top speed
   strokeCruiseMs: number;     // pushed, then no push and no braking for this long: stopped…
   strokeGlideMaxMs: number;   // …or this long while the sliding detector says the hand slides
+  strokeGlideHoldMs: number;  // …and a dropout of the sliding detector shorter than this still counts as sliding (0 = off)
   strokeSettleMs: number;     // after a halt, this long of quiet before the next stroke can start
   strokeMaxSpeedupMs: number; // speeding up for longer than this isn't a hand stroke: cancel it
   strokeRestTauS: number;     // time constant for learning the at-rest acceleration
@@ -87,6 +88,7 @@ export class StrokeTracker {
   // Sliding (desk vibration, from the pipeline): the hand is moving even when it isn't accelerating.
   private slideT = 0;        // s of continuous sliding while idle
   private svx = 0; private svy = 0; // velocity integrated since sliding began, while idle
+  private sinceSlide = 1e9;  // s since the sliding detector last said "sliding"
 
   reset(): void {
     this.phase = 'idle';
@@ -97,7 +99,7 @@ export class StrokeTracker {
     this.k = 0; this.phaseT = 0; this.brakePeak = 0; this.fadeT = 0; this.quietT = 0;
     this.peakSpeed = 0; this.age = 0; this.calmT = 0; this.armT = 0; this.holdOff = false;
     this.leakX = this.leakY = this.rvx = this.rvy = this.rT = 0;
-    this.slideT = this.svx = this.svy = 0;
+    this.slideT = this.svx = this.svy = 0; this.sinceSlide = 1e9;
     this.started = this.cancelled = false;
     this.count = 0;
   }
@@ -159,6 +161,7 @@ export class StrokeTracker {
 
     this.age += dt;
     const gate = sliding !== null;
+    if (sliding) this.sinceSlide = 0; else this.sinceSlide += dt;
 
     switch (this.phase) {
       case 'idle':
@@ -216,7 +219,7 @@ export class StrokeTracker {
           this.vx = this.vy = 0;
           this.cancelled = true;
           this.enter('settle');
-        } else if (this.calmT * 1000 > (gate && sliding ? c.strokeGlideMaxMs : c.strokeCruiseMs)) {
+        } else if (this.calmT * 1000 > (gate && (sliding || this.sinceSlide * 1000 < c.strokeGlideHoldMs) ? c.strokeGlideMaxMs : c.strokeCruiseMs)) {
           // Pushed, then neither pushing nor braking: take it that the hand has stopped and the
           // speed left over is error. While the sliding detector says the hand still slides, a
           // steady glide is real, so it may last much longer (strokeGlideMaxMs).

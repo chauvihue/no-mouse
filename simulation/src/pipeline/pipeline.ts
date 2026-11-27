@@ -91,6 +91,7 @@ export class Pipeline {
   private static readonly SEG_CAP = 20000;
   private segLin = new Float64Array(Pipeline.SEG_CAP * 2); // lin x, y (m/s²) per stored sample
   private segDt = new Float64Array(Pipeline.SEG_CAP);      // dt (s) per stored sample
+  private segVib = new Float64Array(Pipeline.SEG_CAP);     // vibration RMS (mg) per stored sample (for segDriftVibK)
   private segActive = false;
   private segRestN = 0;         // samples in a row passing the segment rest test
   private rtN = 0;              // the same, for the accel-only restRetake
@@ -214,6 +215,11 @@ export class Pipeline {
     // ───────────── 1. Calibration ─────────────
     if (!this.initialised) {
       if (c.enableCalibration) {
+        if (k < Math.round(c.calibSkipMs * fs / 1000)) { // start-up transient: not part of the average
+          o.phase = 'calibrating'; o.still = false; o.frozen = false;
+          o.lin[0] = o.lin[1] = o.lin[2] = 0;
+          return o;
+        }
         this.calibAcc[0] += ax; this.calibAcc[1] += ay; this.calibAcc[2] += az;
         this.calibGyr[0] += s.gx; this.calibGyr[1] += s.gy; this.calibGyr[2] += s.gz;
         this.calibN++;
@@ -556,7 +562,11 @@ export class Pipeline {
    */
   private segmentStep(lin: Vec3, dt: number, gx: number, gy: number, gz: number): void {
     const c = this.cfg;
-    const restHere = Math.hypot(gx, gy, gz) < c.segRestDps && this.fsSpread < c.segRestSpreadG;
+    // rest: quiet gyro, and quiet accel spread and/or no desk vibration (segRestTest)
+    const quietHere = c.segRestTest === 'slide' ? !this.sliding
+      : c.segRestTest === 'spread+slide' ? this.fsSpread < c.segRestSpreadG && !this.sliding
+      : this.fsSpread < c.segRestSpreadG;
+    const restHere = Math.hypot(gx, gy, gz) < c.segRestDps && quietHere;
     this.segRestN = restHere ? this.segRestN + 1 : 0;
     if (this.segRestN >= this.ms2n(c.segRestMs)) {
       // at rest: the segment ends here (once), its stored rest-hold samples are dropped unless wanted
@@ -578,6 +588,7 @@ export class Pipeline {
     const n = this.segN;
     if (n < Pipeline.SEG_CAP) {
       this.segLin[2 * n] = lin[0]; this.segLin[2 * n + 1] = lin[1]; this.segDt[n] = dt;
+      this.segVib[n] = Math.sqrt(this.slideE) * 1000;
       this.segN = n + 1;
     } else this.segOverflow = true;
     this.segVx += lin[0] * dt; this.segVy += lin[1] * dt;
@@ -607,11 +618,27 @@ export class Pipeline {
       let vEx = 0, vEy = 0; // raw v_end: integral over the kept samples
       for (let k = 0; k < n; k++) { vEx += this.segLin[2 * k] * this.segDt[k]; vEy += this.segLin[2 * k + 1] * this.segDt[k]; }
       let vx = 0, vy = 0, dx = 0, dy = 0;
-      for (let k = 0; k < n; k++) {
-        const h = this.segDt[k];
-        vx += this.segLin[2 * k] * h; vy += this.segLin[2 * k + 1] * h;
-        const f = (k + 1) / n;
-        dx += (vx - vEx * f) * h; dy += (vy - vEy * f) * h;
+      if (c.segDriftAccelK === 0 && c.segDriftVibK === 0) {
+        for (let k = 0; k < n; k++) {
+          const h = this.segDt[k];
+          vx += this.segLin[2 * k] * h; vy += this.segLin[2 * k + 1] * h;
+          const f = (k + 1) / n;
+          dx += (vx - vEx * f) * h; dy += (vy - vEy * f) * h;
+        }
+      } else {
+        // drift weighted by motion and vibration: the velocity correction ramps up in proportion to
+        // the cumulative weight w = dt·(1 + Ka·|a| + Kv·vib) instead of linearly in time
+        const wOf = (k: number) => this.segDt[k] * (1 + c.segDriftAccelK * Math.hypot(this.segLin[2 * k], this.segLin[2 * k + 1]) + c.segDriftVibK * this.segVib[k]);
+        let wTot = 0;
+        for (let k = 0; k < n; k++) wTot += wOf(k);
+        let wc = 0;
+        for (let k = 0; k < n; k++) {
+          const h = this.segDt[k];
+          vx += this.segLin[2 * k] * h; vy += this.segLin[2 * k + 1] * h;
+          wc += wOf(k);
+          const f = wc / wTot;
+          dx += (vx - vEx * f) * h; dy += (vy - vEy * f) * h;
+        }
       }
       // raw displacement and cursor movement of this segment so far (live)
       const pdx = this.pos[0] - this.segPos0[0], pdy = this.pos[1] - this.segPos0[1];
