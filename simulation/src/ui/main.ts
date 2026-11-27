@@ -23,6 +23,7 @@ import { BAUD_RATE, SerialImuLink } from './serial.ts';
 import { PanningGuide, nextTake, storeTake, localStamp, guideFileName } from './guide.ts';
 import type { GuideScript } from './guide.ts';
 import type { WebSerialPort } from './serial.ts';
+import { ClickTester } from './clicktest.ts';
 import { theme, invalidateTheme, fingerColor, withAlpha } from './theme.ts';
 import { buildPipelineSliders, buildSimSliders, buildTapSliders } from './settings.ts';
 import type { Bound } from './settings.ts';
@@ -95,6 +96,7 @@ let replay: { data: ReplayData; idx: number; playing: boolean; tracker: TapTrack
 // Live input from the real IMU. rateHz stays 0 until the board's sample rate has been
 // measured from the first readings; the pipeline only starts after that.
 const link = new SerialImuLink();
+const clickTest = new ClickTester(); // Live IMU card's "Click tester" (src/ui/clicktest.ts)
 let live: { tracker: TapTracker; dts: number[]; prevT: number | null; rateHz: number; n: number; lastT: number } | null = null;
 
 /** Pipeline settings for simulated runs (A/B, auto-train): always at the simulator's rate. */
@@ -853,6 +855,7 @@ function liveFrame(): void {
     if (out.tap) L.tracker.detected(out.tap);
     if ((++L.n & 15) === 0) L.tracker.tick(s.t);
     record(s, out, null);
+    clickTest.feed(s, L.rateHz);
   }
   link.queue.length = 0;
 }
@@ -894,6 +897,7 @@ function updateLiveButtons(): void {
   $<HTMLButtonElement>('liveConnect').disabled = !SerialImuLink.supported || link.connected;
   $<HTMLButtonElement>('liveStop').disabled = !link.connected;
   guide.setAvailable(link.connected);
+  clickTest.setAvailable(link.connected);
 }
 
 link.onClose = err => {

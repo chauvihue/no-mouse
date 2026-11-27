@@ -135,7 +135,7 @@ function loadTake(path: string): Take {
   }
   const TH5 = 5 * rmsPeak(ACC5, pauseIdx)[0];
   const TH30 = 5 * rmsPeak(ACC30, pauseIdx)[0];
-  const THG = 5 * rmsPeak(GYR5, pauseIdx)[0];
+  const THG = 4 * rmsPeak(GYR5, pauseIdx)[0];
 
   const name = basename(path).replace(/\.csv$/, '');
   return { name, N, FS, H5, ACC5, ACC30, GYR5, kind, pauseIdx, stillIdx, TH5, TH30, THG, wins };
@@ -147,7 +147,7 @@ function loadTake(path: string): Take {
 //   1 amp:   ACC5 >= 5x pause RMS
 //   2 sharp: 30 Hz-high-passed accel >= 5x pause RMS within +/-20 ms (fast onset)
 //   3 short: ACC5 stays above half its peak for <= 80 ms (no long ring)
-//   4 gyro:  gyro (5 Hz) >= 5x pause RMS within +/-20 ms (matching rotation)
+//   4 gyro:  gyro (5 Hz) >= 4x pause RMS within +/-50 ms (matching rotation)
 const STAGE_NAMES = ['1 amp (acc5 >= 5x rms)', '2 + sharp onset', '3 + short (<=80 ms)', '4 + gyro transient'];
 const REFRACT_MS = 150;
 
@@ -173,7 +173,7 @@ function passesStage(tk: Take, p: number, stage: number): boolean {
   if (tk.ACC5[p] < tk.TH5) return false;
   if (stage >= 2 && maxIn(tk.ACC30, p, w20, tk.N) < tk.TH30) return false;
   if (stage >= 3 && durHalfMs(tk, p) > 80) return false;
-  if (stage >= 4 && maxIn(tk.GYR5, p, w20, tk.N) < tk.THG) return false;
+  if (stage >= 4 && maxIn(tk.GYR5, p, Math.round(0.05 * tk.FS), tk.N) < tk.THG) return false;  // +/-50 ms
   return true;
 }
 function pauseFalseEvents(tk: Take, stage: number): number {
@@ -411,7 +411,7 @@ takes.forEach((tk, t) => {
   const [sg5r, sg5p] = rmsPeak(tk.GYR5, tk.stillIdx);
   console.log(`  noise, pause rows (n=${tk.pauseIdx.length}): acc >5 Hz rms ${a5r.toFixed(4)} g peak ${a5p.toFixed(3)}; acc >30 Hz rms ${a30r.toFixed(4)} peak ${a30p.toFixed(3)}; gyro >5 Hz rms ${g5r.toFixed(2)} peak ${g5p.toFixed(1)} deg/s`);
   console.log(`  noise, still rows (n=${tk.stillIdx.length}): acc >5 Hz rms ${sa5r.toFixed(4)} peak ${sa5p.toFixed(3)}; gyro >5 Hz rms ${sg5r.toFixed(2)} peak ${sg5p.toFixed(1)}`);
-  console.log(`  thresholds (5x pause rms): acc5 ${tk.TH5.toFixed(3)} g, acc30 ${tk.TH30.toFixed(3)} g, gyro5 ${tk.THG.toFixed(2)} deg/s`);
+  console.log(`  thresholds: acc5 ${tk.TH5.toFixed(3)} g (5x pause rms), acc30 ${tk.TH30.toFixed(3)} g (5x), gyro5 ${tk.THG.toFixed(2)} deg/s (4x)`);
   console.log('  detector stage                         clicks detected   pause false events');
   for (let s = 1; s <= 4; s++) {
     const det = tk.wins.filter((w) => detectWindow(tk, w, s).ok).length;

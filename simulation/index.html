@@ -124,6 +124,9 @@
           <button id="guideBtn" disabled title="3-2-1, then the chosen script's timed steps. Records and saves a CSV labelled with each step. Needs the ESP32 connected.">▶ Start guided recording</button>
           <label class="chk" title="Beeps: high at each move, low at each pause, rest or tilt; a tick each second of the countdown"><input type="checkbox" id="guideSound" checked /> Sound</label>
         </div>
+        <div class="row wrap">
+          <button id="clickTestBtn" disabled title="Live check of the left (index) and right (pinky) click detector, with a quiz mode. Needs the ESP32 connected.">Click tester</button>
+        </div>
         <div id="liveInfo" class="hint"></div>
         <div class="row wrap">
           <button id="accelCalBtn" disabled>Calibrate accelerometer (6 faces)</button>
@@ -201,6 +204,35 @@
         <div id="rpCompareOut"></div>
       </details>
     </aside>
+  </div>
+  <div id="clickOverlay" class="ct hidden" role="dialog" aria-label="Click tester">
+    <div class="ct-panel">
+      <div class="ct-head">
+        <h2>Click tester</h2>
+        <button id="ctClose" type="button">Close</button>
+      </div>
+      <div id="ctState" class="hint"></div>
+      <div id="ctCal" class="ct-cal">
+        <div class="ct-cal-text">Hold your hand still — calibrating 2 s</div>
+        <div class="ct-bar"><div id="ctCalBar"></div></div>
+      </div>
+      <div class="ct-pads">
+        <div id="ctLeft" class="ct-pad l"><span class="ct-pad-name">LEFT · index</span><span id="ctLeftN" class="ct-count">0</span></div>
+        <div id="ctRight" class="ct-pad r"><span class="ct-pad-name">RIGHT · pinky</span><span id="ctRightN" class="ct-count">0</span></div>
+      </div>
+      <div id="ctLast" class="ct-last hint"></div>
+      <canvas id="ctStrip" class="ct-strip" title="Last 3 s of high-passed accel magnitude; dashed line = detection threshold; coloured lines = detected taps"></canvas>
+      <div class="ct-controls">
+        <label>Sensitivity <input type="range" id="ctSens" min="0.5" max="2" step="0.05" value="1" /> <span id="ctSensV">1.00×</span></label>
+        <button id="ctRecal" type="button">Recalibrate</button>
+        <label class="chk"><input type="checkbox" id="ctQuiz" /> Quiz mode</label>
+        <label class="chk"><input type="checkbox" id="ctSound" checked /> Sound</label>
+        <button id="ctReset" type="button">Reset</button>
+      </div>
+      <div id="ctPrompt" class="ct-prompt hidden"></div>
+      <div id="ctScore" class="ct-score"></div>
+      <p class="hint">Quiz: a LEFT or RIGHT prompt every 2.5 s; a click counts for a prompt if it peaks within 1.5 s of it. Sensitivity 2× lowers the thresholds (more taps found, more false ones); 0.5× raises them. The live pipeline keeps running underneath and its tap detection stays off.</p>
+    </div>
   </div>
   <div id="guideOverlay" class="guide hidden" role="dialog" aria-live="polite" aria-label="Guided panning recording">
     <div id="guidePanel" class="guide-panel">

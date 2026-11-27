@@ -12,7 +12,9 @@
     "verify": "node scripts/verify.ts",
     "bench:real": "node scripts/bench-real.ts",
     "bench:moves": "node scripts/bench-moves.ts",
-    "analyze:clicks": "node scripts/analyze-clicks.ts"
+    "bench:pan": "node scripts/bench-pan.ts",
+    "analyze:clicks": "node scripts/analyze-clicks.ts",
+    "train:clicks": "node scripts/train-clicks.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

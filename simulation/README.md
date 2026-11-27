@@ -58,6 +58,22 @@ Each MPU-6050 reads a little off at rest (about +0.08 g on x here, where it shou
 
 If a bias is over 150 mg or a scale is outside 90–110 %, the result is rejected and nothing changes. The result is saved in this browser and restored on the next load; **Reset** clears it back to no correction. The raw columns in a recording stay raw, and the recording's header line records the calibration that was active.
 
+### Click tester
+
+Under the live IMU card, **Click tester** (enabled while the ESP32 is connected) opens a panel that checks left and right clicks live, without touching the cursor pipeline:
+
+- **LEFT · index** and **RIGHT · pinky** pads flash and count each detected click. Below them: the last click's peak (g) and its confidence, and a strip of the last 3 s of high-passed accel magnitude with the detection threshold (dashed) and each detected tap coloured by side.
+- The first 2 s after opening it need a still hand (calibration). **Recalibrate** repeats that. **Sensitivity** (0.5×–2×) scales the thresholds: 2× finds weaker taps and also more false ones.
+- **Quiz mode** prompts LEFT or RIGHT every 2.5 s with a beep (high for LEFT, low for RIGHT; **Sound** turns it off) and scores each prompt: a click that peaks within 1.5 s of the prompt is correct or a wrong side; no click is missed. Extra clicks outside the windows are counted separately. **Reset** clears the counts and the quiz.
+
+How it works (`src/clicks/detector.ts`, a streaming version of the rule in `scripts/analyze-clicks.ts`):
+
+1. A 5 Hz high-pass on each accel and gyro axis (30 Hz on accel for the sharpness test). The noise floor is the rms of the still hand, averaged over the calibration and then slowly while the hand is quiet.
+2. A tap is the largest accel magnitude within ±100 ms of its peak, and must be at least 5× the noise rms, have a sharp 30 Hz onset, stay above half its peak for at most 80 ms, and show a gyro transient of 4× the noise rms. A 150 ms refractory period follows each tap. The decision comes 100 ms after the peak, so the detector is causal.
+3. Each tap gets 16 raw features over ±100 ms (per-axis peak-to-peak, max and min, accel and gyro peaks, energy). A logistic regression on the five most separable of them (`src/clicks/model.ts`) gives P(left). Index taps are L, pinky taps are R.
+
+To retrain after recording new guided clicks takes (`npm run train:clicks`, or pass the CSV paths after `--`): the script runs the same detector over the recordings, labels each click window from `guide_click`, reports detections, false events and cross-take accuracy (train on one take, test on the other), then rewrites `src/clicks/model.ts`. Do not edit that file by hand.
+
 ### Recording a session
 
 **● Record** (top bar) saves every sample from Record to Stop (up to 10 minutes) as `imu_session_<time>.csv`: the raw reading (`t, ax…gz`), what the pipeline made of it (`lin_x/y` hand acceleration, `vel_x/y`, `pos_x/y`), the cursor (`cursor_x/y_px`), the `still` / `frozen` flags and any `tap_detected`. A comment line at the top names the input and cursor mode. It works for live, simulated and replayed data; simulated runs also fill `true_x_m, true_y_m`.
