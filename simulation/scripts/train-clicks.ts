@@ -1,9 +1,9 @@
-// Trains the left/right click classifier and writes src/clicks/model.ts.
+// Trains the left/right click classifier and writes algorithms/clicks/model.ts.
 //
 // Run:  npm run train:clicks                              (default: the two clicks takes in ../data)
 //       npm run train:clicks -- file1.csv file2.csv ...   (explicit list)
 //
-// Taps are found and their features computed by the streaming detector in src/clicks/detector.ts,
+// Taps are found and their features computed by the streaming detector in algorithms/clicks/detector.ts,
 // the same class the live click tester runs, so training and live use identical code. Labels come
 // from the guide_click column of the guided "clicks" recordings (rows where guide_step is 'click').
 // A click window is matched to the detector's event with the largest peak inside
@@ -11,17 +11,17 @@
 //
 // Prints per take: detections, false events, noise floor; then cross-take accuracy (train on one
 // take, test on the other, feature selection done inside the training take); then fits the final
-// model on both takes and writes src/clicks/model.ts. Regenerate after changing the detector or
+// model on both takes and writes algorithms/clicks/model.ts. Regenerate after changing the detector or
 // the recordings.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ClickDetector, FEATURE_NAMES } from '../src/clicks/detector.ts';
-import type { ClickEvent, ClickModel, ImuReading, Side } from '../src/clicks/detector.ts';
+import { ClickDetector, FEATURE_NAMES } from '../../algorithms/clicks/detector.ts';
+import type { ClickEvent, ClickModel, ImuReading, Side } from '../../algorithms/clicks/detector.ts';
 
 const DATA_DIR = fileURLToPath(new URL('../../data/', import.meta.url));
-const MODEL_FILE = fileURLToPath(new URL('../src/clicks/model.ts', import.meta.url));
+const MODEL_FILE = fileURLToPath(new URL('../../algorithms/clicks/model.ts', import.meta.url));
 const DEFAULT_FILES = [
   `${DATA_DIR}clicks_take01_2026-11-27_13-58-32.csv`,
   `${DATA_DIR}clicks_take02_2026-11-27_14-05-43.csv`,
@@ -240,7 +240,7 @@ console.log(`  training accuracy ${pct(fin.correct, fin.n)}%  ${confText(fin)}`)
 console.log(`  bias ${final.bias.toFixed(4)}; weights ${final.weights.map((w) => w.toFixed(4)).join(', ')}`);
 console.log(`  standardisation mean ${final.mean.map((v) => v.toFixed(4)).join(', ')}; std ${final.std.map((v) => v.toFixed(4)).join(', ')}`);
 
-// ---------- write src/clicks/model.ts ----------
+// ---------- write algorithms/clicks/model.ts ----------
 const num = (v: number): string => String(Number(v.toPrecision(7)));
 const list = (xs: number[]): string => `[${xs.map(num).join(', ')}]`;
 const model: ClickModel = {

@@ -6,7 +6,7 @@
 // after a header line with those names. Lines starting with '#' are status
 // messages from the firmware; anything else (boot text) is skipped.
 
-import type { ImuSample } from '../pipeline/pipeline.ts';
+import type { ImuSample } from '../../../algorithms/pipeline.ts';
 
 // Anything beyond the largest MPU-6050 ranges (±16 g, ±2000 °/s) can't be a real reading.
 const MAX_ACCEL_G = 16.5;

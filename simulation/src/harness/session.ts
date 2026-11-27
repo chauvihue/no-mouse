@@ -1,11 +1,11 @@
 // Glue between the simulator and the pipeline: shared by the live UI and the
 // headless test runner, so both measure exactly the same thing.
 
-import type { PipelineConfig } from '../pipeline/config.ts';
-import { Pipeline } from '../pipeline/pipeline.ts';
-import type { ImuSample, StepOutput, TapEvent } from '../pipeline/pipeline.ts';
-import type { Finger } from '../pipeline/classifier.ts';
-import { TapClassifier } from '../pipeline/classifier.ts';
+import type { PipelineConfig } from '../../../algorithms/config.ts';
+import { Pipeline } from '../../../algorithms/pipeline.ts';
+import type { ImuSample, StepOutput, TapEvent } from '../../../algorithms/pipeline.ts';
+import type { Finger } from '../../../algorithms/taps/classifier.ts';
+import { TapClassifier } from '../../../algorithms/taps/classifier.ts';
 import { ImuSim } from '../sim/imu.ts';
 import type { SimConfig, Truth } from '../sim/imu.ts';
 

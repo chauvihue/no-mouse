@@ -1,7 +1,7 @@
 // Live scrolling plots: a ring buffer of the last few seconds at 1 kHz and a
 // canvas renderer that draws min/max per pixel column (no aliasing at 1 kHz).
 
-import type { Finger } from '../pipeline/classifier.ts';
+import type { Finger } from '../../../algorithms/taps/classifier.ts';
 import { theme, withAlpha, fingerColor } from './theme.ts';
 
 export const CH = { ax: 0, ay: 1, az: 2, gx: 3, gy: 4, gz: 5, lx: 6, ly: 7, vx: 8, vy: 9, tvx: 10, tvy: 11, still: 12, frozen: 13, hp: 14 } as const;

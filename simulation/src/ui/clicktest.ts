@@ -1,10 +1,10 @@
 // Click tester: checks the left (index) and right (pinky) click detector live on the real IMU.
 // It runs the streaming detector and model that scripts/train-clicks.ts fits
-// (src/clicks/detector.ts, src/clicks/model.ts), fed beside the normal live pipeline, which is
+// (algorithms/clicks/detector.ts, algorithms/clicks/model.ts), fed beside the normal live pipeline, which is
 // not changed. Opened from the Live IMU card while the ESP32 is connected.
 
-import { ClickDetector, DECISION_DELAY_S } from '../clicks/detector.ts';
-import type { ClickEvent, ImuReading, Side } from '../clicks/detector.ts';
+import { ClickDetector, DECISION_DELAY_S } from '../../../algorithms/clicks/detector.ts';
+import type { ClickEvent, ImuReading, Side } from '../../../algorithms/clicks/detector.ts';
 import { theme } from './theme.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;

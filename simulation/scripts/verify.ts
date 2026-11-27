@@ -1,9 +1,9 @@
 // Headless verification of the simulator + pipeline.  Run:  npm run verify
 // (Node ≥ 23 runs TypeScript directly via type stripping.)
 
-import { APP_PIPELINE_CONFIG, DEFAULT_PIPELINE_CONFIG } from '../src/pipeline/config.ts';
-import type { PipelineConfig } from '../src/pipeline/config.ts';
-import { TapClassifier } from '../src/pipeline/classifier.ts';
+import { APP_PIPELINE_CONFIG, DEFAULT_PIPELINE_CONFIG } from '../../algorithms/config.ts';
+import type { PipelineConfig } from '../../algorithms/config.ts';
+import { TapClassifier } from '../../algorithms/taps/classifier.ts';
 import { DEFAULT_SIM_CONFIG, PRESETS } from '../src/sim/imu.ts';
 import type { SimConfig } from '../src/sim/imu.ts';
 import { Session } from '../src/harness/session.ts';

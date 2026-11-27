@@ -2,9 +2,9 @@
 // seed, runs it as fast as the CPU allows, and returns metrics. The live UI and
 // the verification script (scripts/verify.ts) both call these.
 
-import type { PipelineConfig, StepKey } from '../pipeline/config.ts';
-import type { Finger, LabeledFeatures } from '../pipeline/classifier.ts';
-import { TapClassifier } from '../pipeline/classifier.ts';
+import type { PipelineConfig, StepKey } from '../../../algorithms/config.ts';
+import type { Finger, LabeledFeatures } from '../../../algorithms/taps/classifier.ts';
+import { TapClassifier } from '../../../algorithms/taps/classifier.ts';
 import type { SimConfig } from '../sim/imu.ts';
 import { Script, DEFAULT_STROKES } from '../sim/hand.ts';
 import type { Stroke } from '../sim/hand.ts';

@@ -1,7 +1,7 @@
 // CSV export (simulated IMU stream + results) and import (real MPU-6050 logs).
 
-import type { ImuSample, StepOutput } from '../pipeline/pipeline.ts';
-import type { Finger } from '../pipeline/classifier.ts';
+import type { ImuSample, StepOutput } from '../../../algorithms/pipeline.ts';
+import type { Finger } from '../../../algorithms/taps/classifier.ts';
 import type { GuideStep } from './guide.ts';
 
 /** Rolling recorder of the raw IMU stream (+ truth / estimate) for export. */

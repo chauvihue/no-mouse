@@ -22,7 +22,7 @@
 // way, and every stroke starts and ends at exactly zero velocity.
 // Pure TS, no allocation per sample.
 
-import { G } from './math.ts';
+import { G } from '../shared/math.ts';
 
 export type StrokePhase = 'idle' | 'speedup' | 'slowdown' | 'settle';
 

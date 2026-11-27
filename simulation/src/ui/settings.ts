@@ -1,6 +1,6 @@
 // Slider / toggle builders bound to the live config objects.
 
-import type { PipelineConfig } from '../pipeline/config.ts';
+import type { PipelineConfig } from '../../../algorithms/config.ts';
 import type { SimConfig, TapSignature } from '../sim/imu.ts';
 
 export interface SliderSpec {

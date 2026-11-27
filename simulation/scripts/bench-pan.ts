@@ -20,10 +20,10 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { APP_PIPELINE_CONFIG } from '../src/pipeline/config.ts';
-import type { PipelineConfig } from '../src/pipeline/config.ts';
-import { Pipeline } from '../src/pipeline/pipeline.ts';
-import type { ImuSample } from '../src/pipeline/pipeline.ts';
+import { APP_PIPELINE_CONFIG } from '../../algorithms/config.ts';
+import type { PipelineConfig } from '../../algorithms/config.ts';
+import { Pipeline } from '../../algorithms/pipeline.ts';
+import type { ImuSample } from '../../algorithms/pipeline.ts';
 
 declare const process: { argv: string[]; exitCode?: number };
 

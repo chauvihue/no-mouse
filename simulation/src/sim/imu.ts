@@ -6,10 +6,10 @@
 // The "measured" preset adds what a real wrist-worn MPU-6050 showed (recording of Nov 25):
 // vibration while the hand slides (100–300 Hz) and a gyro bias that moves after start-up.
 
-import type { Finger } from '../pipeline/classifier.ts';
-import type { ImuSample } from '../pipeline/pipeline.ts';
-import { DEG, G, quatFromEuler, quatMul, rotateToSensor } from '../pipeline/math.ts';
-import type { Quat, Vec3 } from '../pipeline/math.ts';
+import type { Finger } from '../../../algorithms/taps/classifier.ts';
+import type { ImuSample } from '../../../algorithms/pipeline.ts';
+import { DEG, G, quatFromEuler, quatMul, rotateToSensor } from '../../../algorithms/shared/math.ts';
+import type { Quat, Vec3 } from '../../../algorithms/shared/math.ts';
 import { Rng } from './rng.ts';
 
 export interface TapSignature {

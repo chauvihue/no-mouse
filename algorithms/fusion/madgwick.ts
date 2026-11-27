@@ -1,4 +1,4 @@
-import type { Quat } from './math.ts';
+import type { Quat } from '../shared/math.ts';
 
 /**
  * Madgwick gradient-descent orientation filter, IMU (6-axis) variant.

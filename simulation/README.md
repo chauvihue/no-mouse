@@ -13,6 +13,8 @@ npm run verify     # headless checks of the physics + pipeline (prints the measu
 
 For the presentation, copy `dist/index.html` to the laptop. It has no dependencies and no network access.
 
+> The algorithms (pipeline, fusion, stroke tracker, click detector, calibration) live in the sibling folder `../algorithms/`. See `../algorithms/README.md`.
+
 ## Using it
 
 | Action | How |
@@ -66,13 +68,13 @@ Under the live IMU card, **Click tester** (enabled while the ESP32 is connected)
 - The first 2 s after opening it need a still hand (calibration). **Recalibrate** repeats that. **Sensitivity** (0.5×–2×) scales the thresholds: 2× finds weaker taps and also more false ones.
 - **Quiz mode** prompts LEFT or RIGHT every 2.5 s with a beep (high for LEFT, low for RIGHT; **Sound** turns it off) and scores each prompt: a click that peaks within 1.5 s of the prompt is correct or a wrong side; no click is missed. Extra clicks outside the windows are counted separately. **Reset** clears the counts and the quiz.
 
-How it works (`src/clicks/detector.ts`, a streaming version of the rule in `scripts/analyze-clicks.ts`):
+How it works (`../algorithms/clicks/detector.ts`, a streaming version of the rule in `scripts/analyze-clicks.ts`):
 
 1. A 5 Hz high-pass on each accel and gyro axis (30 Hz on accel for the sharpness test). The noise floor is the rms of the still hand, averaged over the calibration and then slowly while the hand is quiet.
 2. A tap is the largest accel magnitude within ±100 ms of its peak, and must be at least 5× the noise rms, have a sharp 30 Hz onset, stay above half its peak for at most 80 ms, and show a gyro transient of 4× the noise rms. A 150 ms refractory period follows each tap. The decision comes 100 ms after the peak, so the detector is causal.
-3. Each tap gets 16 raw features over ±100 ms (per-axis peak-to-peak, max and min, accel and gyro peaks, energy). A logistic regression on the five most separable of them (`src/clicks/model.ts`) gives P(left). Index taps are L, pinky taps are R.
+3. Each tap gets 16 raw features over ±100 ms (per-axis peak-to-peak, max and min, accel and gyro peaks, energy). A logistic regression on the five most separable of them (`../algorithms/clicks/model.ts`) gives P(left). Index taps are L, pinky taps are R.
 
-To retrain after recording new guided clicks takes (`npm run train:clicks`, or pass the CSV paths after `--`): the script runs the same detector over the recordings, labels each click window from `guide_click`, reports detections, false events and cross-take accuracy (train on one take, test on the other), then rewrites `src/clicks/model.ts`. Do not edit that file by hand.
+To retrain after recording new guided clicks takes (`npm run train:clicks`, or pass the CSV paths after `--`): the script runs the same detector over the recordings, labels each click window from `guide_click`, reports detections, false events and cross-take accuracy (train on one take, test on the other), then rewrites `../algorithms/clicks/model.ts`. Do not edit that file by hand.
 
 ### Recording a session
 
@@ -135,7 +137,7 @@ The app starts with the **stroke tracker**. **Plain double integration** is the 
 
 **Is double integration lossy?** Not in itself. Integrating the *true* hand acceleration twice at 1 kHz reproduces the path exactly (0.0000 mm error over 34 cm of strokes). Adding MPU-6050 white noise (400 µg/√Hz) costs under 2 mm per stroke. The real loss is upstream: any tilt error leaks gravity into "hand acceleration", and integrating twice turns 0.02 g into centimetres within half a second. Without a gyro, wrist wobble during a stroke is exactly such a tilt error.
 
-**The stroke tracker** (`src/pipeline/stroke.ts`) uses what a mouse stroke looks like instead of integrating forever:
+**The stroke tracker** (`../algorithms/motion/stroke.ts`) uses what a mouse stroke looks like instead of integrating forever:
 
 1. **Start**: acceleration (measured against what the sensor reads at rest, so a steady tilt offset doesn't count) passes 6 mg in a steady direction for 10 ms. That first push sets the direction; the few ms before the threshold are integrated back in.
 2. **Speeding up**: acceleration is integrated into velocity (2-D, so the direction can still settle).
@@ -169,7 +171,7 @@ Very slow strokes (1 cm over 0.5–0.8 s, peak acceleration ≈ 0.01–0.02 g) a
 
 #### Rest-to-rest correction (optional)
 
-Motion model **Stroke + rest-to-rest correction (gyro mode)** (`motionModel: 'segment'`, `src/pipeline/pipeline.ts`, `segment*` settings in `config.ts`). The cursor moves live from the stroke tracker (`segLive: 'stroke'`). When the hand is at rest again (quiet gyro and a steady accelerometer), the move's acceleration is re-integrated with velocity forced to zero at both ends, and the cursor is corrected to that end point. A tilt gate skips the correction if the wrist rotated more than 6° during the move (a tilt, not a slide). It is opt-in: the default stays *plain double integration* until chosen, and the app keeps the stroke tracker. Accel-only modes are not supported well.
+Motion model **Stroke + rest-to-rest correction (gyro mode)** (`motionModel: 'segment'`, `../algorithms/pipeline.ts`, `segment*` settings in `config.ts`). The cursor moves live from the stroke tracker (`segLive: 'stroke'`). When the hand is at rest again (quiet gyro and a steady accelerometer), the move's acceleration is re-integrated with velocity forced to zero at both ends, and the cursor is corrected to that end point. A tilt gate skips the correction if the wrist rotated more than 6° during the move (a tilt, not a slide). It is opt-in: the default stays *plain double integration* until chosen, and the app keeps the stroke tracker. Accel-only modes are not supported well.
 
 Results on recording 2 (settled reading, gyro mode, true 10 cm):
 
@@ -244,14 +246,15 @@ Axes: x = hand right, y = forward (toward the fingers), z = up out of the back o
 ## Code layout
 
 ```
-src/pipeline/   ← the device firmware, pure TS, no DOM — port this to C++
-  config.ts       every tunable parameter in ONE object (+ step toggles)
+../algorithms/   ← the device algorithms, pure TS, no DOM — port this to C++ (see ../algorithms/README.md)
   pipeline.ts     Pipeline.step(sample) → cursor, state, tap events
-  madgwick.ts     Madgwick IMU filter (reference implementation port)
-  classifier.ts   tap features + logistic regression / nearest centroid
-  math.ts         quaternion helpers
-  gravity.ts      accelerometer-only gravity tracking: complementary + Kalman (no gyro)
-  stroke.ts       stroke tracker: speed-up → slow-down → halt, velocity exactly 0 between strokes
+  config.ts       every tunable parameter in ONE object (+ step toggles)
+  fusion/         madgwick.ts, gravity.ts (accel-only gravity tracking)
+  motion/stroke.ts  stroke tracker: speed-up → slow-down → halt, velocity exactly 0 between strokes
+  taps/classifier.ts  tap features + classifier
+  clicks/         left/right click detector and its trained model
+  calibration/    six-face accelerometer calibration maths
+  shared/math.ts  quaternion helpers
 src/sim/        ← the physics: true hand → simulated MPU-6050 readings
   imu.ts          accel = R(q)ᵀ(p̈ + g), gyro from orientation, wobble, taps, noise, offsets, drift, ADC,
                   + the measured preset: sliding vibration and gyro bias warm-up
@@ -265,7 +268,7 @@ scripts/verify.ts       headless checks on the simulator (npm run verify)
 scripts/bench-real.ts   scores the pipeline on real recordings (npm run bench:real)
 ```
 
-## The pipeline (`src/pipeline/pipeline.ts`)
+## The pipeline (`../algorithms/pipeline.ts`)
 
 Each step has a toggle so its effect can be shown.
 

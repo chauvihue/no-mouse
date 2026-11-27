@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["src", "scripts/verify.ts", "vite.config.ts"]
+  "include": ["src", "../algorithms", "scripts/verify.ts", "vite.config.ts"]
 }

@@ -18,7 +18,7 @@
 // x axis projected onto the horizontal plane, forward = up × right.
 // Pure TS, no allocation per sample.
 
-import type { Vec3 } from './math.ts';
+import type { Vec3 } from '../shared/math.ts';
 
 export interface GravityConfig {
   compTauS: number;        // complementary: low-pass time constant

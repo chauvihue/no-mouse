@@ -13,10 +13,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, basename } from 'node:path';
-import { APP_PIPELINE_CONFIG } from '../src/pipeline/config.ts';
-import type { PipelineConfig } from '../src/pipeline/config.ts';
-import { Pipeline } from '../src/pipeline/pipeline.ts';
-import type { ImuSample } from '../src/pipeline/pipeline.ts';
+import { APP_PIPELINE_CONFIG } from '../../algorithms/config.ts';
+import type { PipelineConfig } from '../../algorithms/config.ts';
+import { Pipeline } from '../../algorithms/pipeline.ts';
+import type { ImuSample } from '../../algorithms/pipeline.ts';
 import { swingShape } from '../src/harness/scenarios.ts';
 
 declare const process: { argv: string[]; exitCode?: number; cwd(): string };

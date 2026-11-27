@@ -2,7 +2,7 @@
 // No hard-coded decision rule: the decision boundary is learned from recorded
 // taps. Both models are a handful of floats, trivially portable to the ESP32.
 
-import type { ClassifierKind } from './config.ts';
+import type { ClassifierKind } from '../config.ts';
 
 export type Finger = 'index' | 'pinky';
 

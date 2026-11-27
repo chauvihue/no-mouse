@@ -8,14 +8,14 @@
 
 import type { PipelineConfig } from './config.ts';
 import { DEFAULT_PIPELINE_CONFIG, isAccelOnly } from './config.ts';
-import { madgwickUpdateIMU } from './madgwick.ts';
-import { GravityTracker } from './gravity.ts';
-import { StrokeTracker } from './stroke.ts';
-import type { StrokePhase } from './stroke.ts';
-import { DEG, G, quatFromEuler, quatFromGravity, quatYaw, rotateToWorld } from './math.ts';
-import type { Quat, Vec3 } from './math.ts';
-import { TapClassifier, extractFeatures } from './classifier.ts';
-import type { Finger } from './classifier.ts';
+import { madgwickUpdateIMU } from './fusion/madgwick.ts';
+import { GravityTracker } from './fusion/gravity.ts';
+import { StrokeTracker } from './motion/stroke.ts';
+import type { StrokePhase } from './motion/stroke.ts';
+import { DEG, G, quatFromEuler, quatFromGravity, quatYaw, rotateToWorld } from './shared/math.ts';
+import type { Quat, Vec3 } from './shared/math.ts';
+import { TapClassifier, extractFeatures } from './taps/classifier.ts';
+import type { Finger } from './taps/classifier.ts';
 
 /** One IMU reading, MPU-6050 style units. */
 export interface ImuSample {

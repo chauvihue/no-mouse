@@ -1,11 +1,11 @@
 import './style.css';
-import { APP_PIPELINE_CONFIG, DEFAULT_PIPELINE_CONFIG, PIPELINE_STEPS } from '../pipeline/config.ts';
-import type { FusionMode, MotionModel, PipelineConfig, StepKey, ClassifierKind } from '../pipeline/config.ts';
-import type { StrokePhase } from '../pipeline/stroke.ts';
-import type { Finger, LabeledFeatures } from '../pipeline/classifier.ts';
-import { TapClassifier } from '../pipeline/classifier.ts';
-import type { ImuSample, StepOutput } from '../pipeline/pipeline.ts';
-import { Pipeline } from '../pipeline/pipeline.ts';
+import { APP_PIPELINE_CONFIG, DEFAULT_PIPELINE_CONFIG, PIPELINE_STEPS } from '../../../algorithms/config.ts';
+import type { FusionMode, MotionModel, PipelineConfig, StepKey, ClassifierKind } from '../../../algorithms/config.ts';
+import type { StrokePhase } from '../../../algorithms/motion/stroke.ts';
+import type { Finger, LabeledFeatures } from '../../../algorithms/taps/classifier.ts';
+import { TapClassifier } from '../../../algorithms/taps/classifier.ts';
+import type { ImuSample, StepOutput } from '../../../algorithms/pipeline.ts';
+import { Pipeline } from '../../../algorithms/pipeline.ts';
 import { DEFAULT_SIM_CONFIG, PRESETS, cloneSimConfig } from '../sim/imu.ts';
 import type { PresetName, SimConfig } from '../sim/imu.ts';
 import { HandModel, DEFAULT_STROKES } from '../sim/hand.ts';
@@ -29,6 +29,8 @@ import { buildPipelineSliders, buildSimSliders, buildTapSliders } from './settin
 import type { Bound } from './settings.ts';
 import { abChart, ablationChart, confusionHTML, scatterSVG, strokePathSVG, driftSVG, installTooltip, fmtNum } from './charts.ts';
 import type { AblationRow } from './charts.ts';
+import { ACCEL_FACES, accelFaceFromMean, accelCalFromFaces } from '../../../algorithms/calibration/accel-six-face.ts';
+import type { AccelFace } from '../../../algorithms/calibration/accel-six-face.ts';
 
 // ───────────────────────── state ─────────────────────────
 
@@ -914,8 +916,6 @@ $('liveStop').addEventListener('click', stopLiveInput);
 // raw readings. A face counts once the board has been still for ACCEL_STILL_S seconds on it.
 
 const ACCEL_CAL_KEY = 'wml-accel-cal';
-const ACCEL_FACES = ['+X', '-X', '+Y', '-Y', '+Z', '-Z'] as const;
-type AccelFace = typeof ACCEL_FACES[number];
 const ACCEL_STILL_S = 2;     // still for this long = resting on a face
 const ACCEL_WIN_CAP = 4096;  // ring buffer: ≥ 2 s at up to 2 kHz; fields per sample: t, ax, ay, az, gx, gy, gz
 const accelWin = new Float64Array(ACCEL_WIN_CAP * 7);
@@ -970,12 +970,8 @@ function accelCalCheckRest(tNow: number): void {
     gDev = Math.max(gDev, Math.hypot(accelWin[o + 4] - m[3], accelWin[o + 5] - m[4], accelWin[o + 6] - m[5]));
   }
   if (Math.sqrt(va / n) >= 0.01 || gDev >= 2) return; // moving
-  // which axis is near ±1 g, and are the other two near zero?
-  let axis = 0;
-  for (let i = 1; i < 3; i++) if (Math.abs(m[i]) > Math.abs(m[axis])) axis = i;
-  const others = [0, 1, 2].filter(i => i !== axis);
-  if (Math.abs(m[axis]) <= 0.8 || others.some(i => Math.abs(m[i]) >= 0.3)) return;
-  const face = `${m[axis] > 0 ? '+' : '-'}${'XYZ'[axis]}` as AccelFace;
+  const face = accelFaceFromMean(m); // which face: one axis near ±1 g, the other two near zero
+  if (!face) return;
   accelWinN = 0; // the next decision needs another full window of stillness
   if (accelCal.faces[face]) { accelCalShow(`${face.replace('-', '−')} is already done. Rest the board on another face.`); return; }
   accelCal.faces[face] = [m[0], m[1], m[2]];
@@ -1004,17 +1000,7 @@ function accelCalShow(msg = ''): void {
 }
 
 function accelCalFinish(): void {
-  const f = accelCal!.faces as Record<AccelFace, number[]>;
-  const bias: [number, number, number] = [0, 0, 0], scale: [number, number, number] = [1, 1, 1];
-  const problems: string[] = [];
-  for (let i = 0; i < 3; i++) {
-    const ax = 'XYZ'[i];
-    const up = f[`+${ax}` as AccelFace][i], down = f[`-${ax}` as AccelFace][i];
-    bias[i] = (up + down) / 2;
-    scale[i] = 2 / (up - down);
-    if (Math.abs(bias[i]) > 0.15) problems.push(`${ax} bias ${(bias[i] * 1000).toFixed(0)} mg is over 150 mg`);
-    if (!(scale[i] >= 0.9 && scale[i] <= 1.1)) problems.push(`${ax} scale ${(scale[i] * 100).toFixed(0)} % is outside 90–110 %`);
-  }
+  const { bias, scale, problems } = accelCalFromFaces(accelCal!.faces);
   if (problems.length) {
     accelCal = null; accelWinN = 0;
     accelCalShow(`Not applied: ${problems.join('; ')}. Check the faces and try again.`);

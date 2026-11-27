@@ -3,8 +3,8 @@
 // a data-tip that the shared tooltip shows on hover.
 
 import type { ABResult, StrokeRun, DriftRun } from '../harness/scenarios.ts';
-import type { LabeledFeatures } from '../pipeline/classifier.ts';
-import { FEATURE_NAMES, TapClassifier } from '../pipeline/classifier.ts';
+import type { LabeledFeatures } from '../../../algorithms/taps/classifier.ts';
+import { FEATURE_NAMES, TapClassifier } from '../../../algorithms/taps/classifier.ts';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export function fmtNum(v: number, unit = ''): string {
