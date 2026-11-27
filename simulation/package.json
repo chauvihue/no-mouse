@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "verify": "node scripts/verify.ts",
     "bench:real": "node scripts/bench-real.ts",
-    "bench:moves": "node scripts/bench-moves.ts"
+    "bench:moves": "node scripts/bench-moves.ts",
+    "analyze:clicks": "node scripts/analyze-clicks.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

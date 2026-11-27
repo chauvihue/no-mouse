@@ -20,6 +20,8 @@ import { PlotBuffer, PlotView, CH } from './plots.ts';
 import { Recorder, SessionRecorder, download, parseImuCsv } from './csv.ts';
 import type { ReplayData } from './csv.ts';
 import { BAUD_RATE, SerialImuLink } from './serial.ts';
+import { PanningGuide, nextTake, storeTake, localStamp, guideFileName } from './guide.ts';
+import type { GuideScript } from './guide.ts';
 import type { WebSerialPort } from './serial.ts';
 import { theme, invalidateTheme, fingerColor, withAlpha } from './theme.ts';
 import { buildPipelineSliders, buildSimSliders, buildTapSliders } from './settings.ts';
@@ -44,6 +46,11 @@ const plotBuf = new PlotBuffer(6, 1000);
 const plotView = new PlotView($<HTMLCanvasElement>('plots'));
 const recorder = new Recorder(120, 1000);
 const sessionRec = new SessionRecorder(600, 1000); // the Record button: up to 10 min at 1 kHz
+/** Guided panning recording: starts/stops sessionRec at the script's ends, and labels each sample with its step. */
+const guide = new PanningGuide({
+  startRecording: script => { if (!sessionRec.recording) toggleRecording(script); },
+  stopRecording: aborted => { if (sessionRec.recording) stopAndSave(aborted); },
+});
 
 let target: [number, number] = [START_X, START_Y];
 let prevTarget: [number, number] = [START_X, START_Y];
@@ -119,7 +126,7 @@ function record(sample: ImuSample, out: StepOutput, truth: { px: number; py: num
   wasRunning = running;
   const ex = anchor[0] + out.pos[0], ey = anchor[1] + out.pos[1];
   recorder.push(sample, truth?.tap ?? null, truth?.px ?? NaN, truth?.py ?? NaN, out.pos[0], out.pos[1], out.cursor[0], out.cursor[1], out.still);
-  sessionRec.push(sample, out, truth?.px ?? NaN, truth?.py ?? NaN);
+  sessionRec.push(sample, out, truth?.px ?? NaN, truth?.py ?? NaN, guide.stepIndexAt(performance.now()));
   if (plotBuf.n % 10 === 0) {
     if (truth) { truePath.push([truth.px, truth.py]); if (truePath.length > 1000) truePath.shift(); }
     if (running) { estPath.push([ex, ey]); if (estPath.length > 1000) estPath.shift(); }
@@ -276,15 +283,45 @@ function showOffsets(): void {
 }
 
 // ── session recording: every IMU reading + what the pipeline / cursor did with it ──
-function toggleRecording(): void {
+/** The guided run being recorded: its script, take number and local start time (null for ordinary recordings). */
+let guidedRun: { script: GuideScript; take: number; started: Date } | null = null;
+
+function toggleRecording(guided: GuideScript | null = null): void {
   if (!sessionRec.recording) {
     const mode = `${$<HTMLSelectElement>('fusionMode').selectedOptions[0]?.textContent ?? P().fusionMode}, ${$<HTMLSelectElement>('motionModel').selectedOptions[0]?.textContent ?? P().motionModel}`;
     const cal = `accel cal: bias [${P().accelBias.map(v => (v * 1000).toFixed(1)).join(', ')}] mg, scale [${P().accelScale.map(v => (v * 100).toFixed(2)).join(', ')}] %`;
-    sessionRec.start(`${new Date().toISOString()} · input: ${source === 'live' ? 'live IMU' : source === 'replay' ? 'replayed file' : 'simulation'} · cursor mode: ${mode} · ${P().sampleRateHz} Hz · ${cal}`);
+    const meta = `${new Date().toISOString()} · input: ${source === 'live' ? 'live IMU' : source === 'replay' ? 'replayed file' : 'simulation'} · cursor mode: ${mode} · ${P().sampleRateHz} Hz · ${cal}`;
+    if (guided) {
+      const started = new Date();
+      const take = nextTake(guided.id);
+      guidedRun = { script: guided, take, started };
+      const note = `${guided.note} · script ${guided.id} · take ${String(take).padStart(2, '0')} · started ${localStamp(started, ' ')} (local)`;
+      sessionRec.start(meta, note, guided.steps);
+    } else {
+      guidedRun = null;
+      sessionRec.start(meta);
+    }
   } else {
-    sessionRec.stop();
-    if (sessionRec.rows) download(`imu_session_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`, sessionRec.toBlob());
+    stopAndSave(true); // a manual stop during a guided run counts as aborted
   }
+  updateRecordButton();
+}
+
+/** Stops the recorder and downloads the CSV (named by take for guided runs; the take counter moves on only when a file is saved). */
+function stopAndSave(aborted: boolean): void {
+  sessionRec.stop();
+  const run = guidedRun;
+  guidedRun = null;
+  if (sessionRec.rows) {
+    if (run) {
+      download(guideFileName(run.script.id, run.take, run.started, aborted), sessionRec.toBlob());
+      storeTake(run.script.id, run.take + 1);
+    } else {
+      download(`imu_session_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`, sessionRec.toBlob());
+    }
+  }
+  guide.abort(); // no-op when the guide itself is what stopped the recording
+  guide.refreshTakes();
   updateRecordButton();
 }
 function updateRecordButton(): void {
@@ -292,7 +329,7 @@ function updateRecordButton(): void {
   b.classList.toggle('recording', sessionRec.recording);
   b.textContent = sessionRec.recording ? `■ Stop & save · ${(sessionRec.rows / P().sampleRateHz).toFixed(0)} s` : '● Record';
 }
-$('btnRecord').addEventListener('click', toggleRecording);
+$('btnRecord').addEventListener('click', () => toggleRecording());
 
 $<HTMLInputElement>('chkDebug').addEventListener('change', () => { /* read every frame */ });
 $('btnTheme').addEventListener('click', () => {
@@ -833,6 +870,7 @@ function showLiveInfo(): void {
 
 /** Leaves live mode (without closing the port) and goes back to the simulator. */
 function leaveLive(): void {
+  guide.abort();
   if (source !== 'live') return;
   accelCal = null; accelWinN = 0;
   source = 'sim';
@@ -855,6 +893,7 @@ function useSimulation(): void {
 function updateLiveButtons(): void {
   $<HTMLButtonElement>('liveConnect').disabled = !SerialImuLink.supported || link.connected;
   $<HTMLButtonElement>('liveStop').disabled = !link.connected;
+  guide.setAvailable(link.connected);
 }
 
 link.onClose = err => {

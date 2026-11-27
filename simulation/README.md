@@ -64,6 +64,37 @@ If a bias is over 150 mg or a scale is outside 90–110 %, the result is rejecte
 
 A recording loads straight back into **Replay real data**. **Compare cursor modes** runs the file through each mode and reports how long the cursor sat on a screen edge, how far it ended from where it started, and its top speed. End a recording with your hand back where it started and *start→end* becomes a drift measure.
 
+### Guided panning recording
+
+Under the live IMU card, pick a script, then **▶ Start guided recording**. A 3-2-1 countdown runs (ticks), then the script plays on a full-screen panel with a countdown for each step, the section and progress, the next step, and (for moves) a pacing dot that travels from the left mark to the right mark over the move. Beeps: high at each move, L/R pitches at each click, low at each pause, rest, still or tilt step. **Sound** turns them off. Recording starts when step 1 begins and stops (and saves) when the script ends. **Stop guide** (or the live Record button) ends it early; an early stop is saved as `_aborted`.
+
+Two scripts:
+
+**panning v1** (hand slides between two marks 10 cm apart on paper):
+
+| Section | Steps |
+|---|---|
+| start | still 5 s, "Hold still on the LEFT mark" |
+| quick / normal / slow / very-slow | 6 moves of 0.3 / 0.6 / 1.5 / 3.5 s, alternating L→R and R→L, each followed by a 1.5 s pause; then a 4 s rest |
+| tilt | 8 s, "Rock your wrist slowly … do NOT slide" |
+| end | still 5 s, "Hold still — finishing" |
+
+**clicks v1** (hand stays still on the paper; tap with the index finger = left click, pinky = right click):
+
+| Section | Steps |
+|---|---|
+| start | still 5 s, "Rest your hand still" |
+| left | 10 × [tap LEFT (index) 1.0 s, pause 1.5 s]; then a 4 s rest |
+| right | 10 × [tap RIGHT (pinky) 1.0 s, pause 1.5 s]; then a 4 s rest |
+| mixed | 20 taps, 10 L + 10 R in a shuffled order (fixed seed, so every run has the same order), each followed by a 1.5 s pause; then a 4 s rest |
+| end | still 5 s, "Hold still — finishing" |
+
+The scripts are data in `src/ui/guide.ts` (`panningSteps`, `clicksSteps`).
+
+**Files.** A guided run saves `<script>_take<NN>_<YYYY-MM-DD>_<HH-MM-SS>.csv`, for example `panning_take01_2026-11-27_14-05-33.csv`. The take number is counted separately for each script and kept in this browser's localStorage; the next number is shown next to the script menu, and **reset count** sets both back to 01. The time is the local time when the run started. A run that was stopped early is saved with `_aborted` before `.csv`. The take counter only moves on when a file is actually saved. Ordinary **● Record** recordings keep the `imu_session_<time>.csv` name.
+
+**CSV columns.** Guided rows add `guide_section` (start, quick, … / left, right, mixed / tilt, end), `guide_step` (`still`, `move`, `pause`, `tilt`, `click`), `guide_move` (the move index for panning moves, the click index for clicks; empty otherwise), `guide_dir` (`+1` / `-1` for panning moves, `0` otherwise) and `guide_click` (`L` / `R` for clicks, empty otherwise). Each sample is labelled with the step active when it was processed. Rows from ordinary recordings leave these columns empty. The first comment lines name the script, its timings, the take number and the local start time. The columns are added at the end of the header, so the importers and the bench scripts still find the other columns by name.
+
 ### Cursor modes (Pipeline steps → Fusion mode)
 
 The app starts in **Accel only: Kalman**: cursor motion comes from the accelerometer alone, and the gyro is ignored (it is still used for tap classification).

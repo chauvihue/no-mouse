@@ -2,6 +2,7 @@
 
 import type { ImuSample, StepOutput } from '../pipeline/pipeline.ts';
 import type { Finger } from '../pipeline/classifier.ts';
+import type { GuideStep } from './guide.ts';
 
 /** Rolling recorder of the raw IMU stream (+ truth / estimate) for export. */
 export class Recorder {
@@ -52,34 +53,42 @@ export class SessionRecorder {
     't', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'true_x_m', 'true_y_m',
     'lin_x_ms2', 'lin_y_ms2', 'vel_x_ms', 'vel_y_ms', 'pos_x_m', 'pos_y_m',
     'cursor_x_px', 'cursor_y_px', 'still', 'frozen', 'tap_detected',
+    'guide_section', 'guide_step', 'guide_move', 'guide_dir', 'guide_click',
   ];
   private static readonly NUM = 18; // numeric columns after t (tap_detected is text)
   private static readonly CHUNK = 10000;
+  private static readonly NO_STEP = 255; // guide step index stored for samples outside a guided run
   readonly maxRows: number;
   private t: Float64Array[] = [];
   private d: Float32Array[] = [];
+  private g: Uint8Array[] = []; // guide step index per row
   private taps = new Map<number, Finger>();
   private meta = '';
+  private note = '';
+  private steps: GuideStep[] = []; // the guided script that was run (indexes the guide column)
   rows = 0;
   recording = false;
 
   constructor(maxSeconds = 600, rateHz = 1000) { this.maxRows = maxSeconds * rateHz; }
 
-  start(meta: string): void {
-    this.t = []; this.d = []; this.taps.clear();
-    this.rows = 0; this.meta = meta; this.recording = true;
+  /** `note` is an extra comment line for the header; `steps` is the guided script behind the guide column. */
+  start(meta: string, note = '', steps: GuideStep[] = []): void {
+    this.t = []; this.d = []; this.g = []; this.taps.clear();
+    this.rows = 0; this.meta = meta; this.note = note; this.steps = steps; this.recording = true;
   }
 
   stop(): void { this.recording = false; }
 
   get full(): boolean { return this.rows >= this.maxRows; }
 
-  push(s: ImuSample, out: StepOutput, trueX: number, trueY: number): void {
+  /** `guideStep` is the index into the guided script's steps active when this sample was processed, or -1. */
+  push(s: ImuSample, out: StepOutput, trueX: number, trueY: number, guideStep = -1): void {
     if (!this.recording || this.full) return;
     const C = SessionRecorder.CHUNK, N = SessionRecorder.NUM;
     const ci = Math.floor(this.rows / C), ri = this.rows % C;
-    if (ri === 0) { this.t.push(new Float64Array(C)); this.d.push(new Float32Array(C * N)); }
+    if (ri === 0) { this.t.push(new Float64Array(C)); this.d.push(new Float32Array(C * N)); this.g.push(new Uint8Array(C)); }
     this.t[ci][ri] = s.t;
+    this.g[ci][ri] = guideStep < 0 ? SessionRecorder.NO_STEP : guideStep;
     const d = this.d[ci], o = ri * N;
     d[o] = s.ax; d[o + 1] = s.ay; d[o + 2] = s.az; d[o + 3] = s.gx; d[o + 4] = s.gy; d[o + 5] = s.gz;
     d[o + 6] = trueX; d[o + 7] = trueY;
@@ -94,7 +103,10 @@ export class SessionRecorder {
 
   /** The CSV, built in pieces so a long session doesn't need one giant string. */
   toBlob(): Blob {
-    const parts: string[] = [`# Wrist Mouse Lab session · ${this.meta}\n`, SessionRecorder.COLUMNS.join(',') + '\n'];
+    const parts: string[] = [
+      `# Wrist Mouse Lab session · ${this.meta}\n` + (this.note ? `${this.note}\n` : ''),
+      SessionRecorder.COLUMNS.join(',') + '\n',
+    ];
     const C = SessionRecorder.CHUNK, N = SessionRecorder.NUM;
     const f = (v: number, digits: number) => (Number.isFinite(v) ? v.toFixed(digits) : '');
     for (let ci = 0; ci * C < this.rows; ci++) {
@@ -107,12 +119,26 @@ export class SessionRecorder {
           f(d[o + 6], 5), f(d[o + 7], 5), f(d[o + 8], 4), f(d[o + 9], 4), f(d[o + 10], 5), f(d[o + 11], 5),
           f(d[o + 12], 5), f(d[o + 13], 5), f(d[o + 14], 1), f(d[o + 15], 1), d[o + 16], d[o + 17],
           this.taps.get(ci * C + ri) ?? '',
+          ...guideCells(this.g[ci][ri] === SessionRecorder.NO_STEP ? undefined : this.steps[this.g[ci][ri]]),
         ].join(','));
       }
       parts.push(lines.join('\n') + '\n');
     }
     return new Blob(parts, { type: 'text/csv' });
   }
+}
+
+/**
+ * guide_section, guide_step, guide_move, guide_dir, guide_click: empty outside a guided run.
+ * guide_move is the move index (panning) or click index (clicks); dir is 0 and click is empty for non-moves / non-clicks.
+ */
+function guideCells(st: GuideStep | undefined): string[] {
+  if (!st) return ['', '', '', '', ''];
+  const indexed = st.kind === 'move' || st.kind === 'click';
+  return [
+    st.section, st.kind, indexed ? String(st.n) : '',
+    st.dir > 0 ? '+1' : st.dir < 0 ? '-1' : '0', st.click,
+  ];
 }
 
 export function download(name: string, text: string | Blob): void {

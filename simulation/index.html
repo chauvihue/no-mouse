@@ -114,6 +114,16 @@
           <button id="liveConnect" class="primary">Connect ESP32</button>
           <button id="liveStop" disabled>Back to simulation</button>
         </div>
+        <div class="row wrap">
+          <select id="guideScript" title="Which guided script to run">
+            <option value="panning" selected>Panning (L/R, 4 speeds)</option>
+            <option value="clicks">Clicks (index = left, pinky = right)</option>
+          </select>
+          <span id="guideTake" class="hint"></span>
+          <button id="guideTakeReset" class="linkbtn" title="Start take numbers again at 01 for both scripts">reset count</button>
+          <button id="guideBtn" disabled title="3-2-1, then the chosen script's timed steps. Records and saves a CSV labelled with each step. Needs the ESP32 connected.">▶ Start guided recording</button>
+          <label class="chk" title="Beeps: high at each move, low at each pause, rest or tilt; a tick each second of the countdown"><input type="checkbox" id="guideSound" checked /> Sound</label>
+        </div>
         <div id="liveInfo" class="hint"></div>
         <div class="row wrap">
           <button id="accelCalBtn" disabled>Calibrate accelerometer (6 faces)</button>
@@ -191,6 +201,21 @@
         <div id="rpCompareOut"></div>
       </details>
     </aside>
+  </div>
+  <div id="guideOverlay" class="guide hidden" role="dialog" aria-live="polite" aria-label="Guided panning recording">
+    <div id="guidePanel" class="guide-panel">
+      <div id="guideHead" class="guide-head"></div>
+      <div id="guideText" class="guide-text"></div>
+      <div id="guideTime" class="guide-time"></div>
+      <div id="guidePace" class="guide-pace hidden">
+        <div class="guide-track"><span class="guide-end guide-l">L</span><span class="guide-end guide-r">R</span><div id="guideDot" class="guide-dot"></div></div>
+      </div>
+      <div id="guideNext" class="guide-next"></div>
+      <div class="guide-foot">
+        <div class="guide-overall"><div id="guideBar"></div></div>
+        <button id="guideStop">■ Stop guide</button>
+      </div>
+    </div>
   </div>
   <script type="module" src="/src/ui/main.ts"></script>
 </body>
