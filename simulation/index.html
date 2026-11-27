@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wrist Mouse Lab</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <strong>Wrist Mouse Lab</strong>
+      <span class="sub">MPU-6050 gesture-mouse precision simulator</span>
+    </div>
+    <div class="topctl">
+      <span id="statusPill" class="pill">Starting…</span>
+      <button id="btnRecord" title="Record every IMU reading and what the cursor did with it, then save it as a CSV (up to 10 min)">● Record</button>
+      <button id="btnPause" title="Pause / resume the simulation (Space)">Pause</button>
+      <button id="btnRecal" title="Reset the pipeline and re-run the 1 s calibration (R)">Recalibrate</button>
+      <label class="chk" title="Show the TRUE hand path vs the estimated path (hidden automatically during precision tests)"><input type="checkbox" id="chkDebug" checked /> Debug overlay</label>
+      <button id="btnTheme" title="Toggle light / dark">◐</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <main class="stage">
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="live" class="active">Live</button>
+        <button role="tab" data-tab="ab">A/B compare</button>
+        <button role="tab" data-tab="clf">Tap classifier</button>
+        <button role="tab" data-tab="results">Results &amp; export</button>
+      </nav>
+
+      <section class="tabpanel active" id="tab-live">
+        <div class="viewwrap">
+          <canvas id="mainView" width="1000" height="560"></canvas>
+          <div id="viewOverlay" class="overlay hidden"></div>
+        </div>
+        <div class="plotwrap">
+          <canvas id="plots" height="470"></canvas>
+          <div class="legend" id="plotLegend"></div>
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-ab">
+        <div class="card">
+          <div class="row wrap">
+            <label>Pipeline step
+              <select id="abStep"></select>
+            </label>
+            <label class="chk"><input type="checkbox" id="abStrokes" checked /> Stroke test</label>
+            <label class="chk"><input type="checkbox" id="abDrift" checked /> Drift test</label>
+            <label class="chk"><input type="checkbox" id="abTaps" checked /> Tap test</label>
+            <label>Repeats <input type="number" id="abRepeats" value="5" min="1" max="20" style="width:4em" /></label>
+            <label>Drift length (s) <input type="number" id="abDriftS" value="30" min="5" max="120" style="width:4em" /></label>
+            <button id="abRun" class="primary">Run A/B</button>
+            <button id="abSweep" title="Turn each step off in turn vs everything on">Ablation sweep (all steps)</button>
+          </div>
+          <p class="hint">Runs the same scripted tests (same random seeds) with the chosen step <b>off (A)</b> and <b>on (B)</b>, using the current sensor preset and every other setting as it is now. Runs headless, so it takes a second or two.</p>
+          <div class="progress hidden" id="abProgress"><div></div></div>
+        </div>
+        <div id="abOut"></div>
+      </section>
+
+      <section class="tabpanel" id="tab-clf">
+        <div class="grid2">
+          <div class="card">
+            <h3>Train the classifier</h3>
+            <p class="hint">The finger is decided by a trained model (features: per-axis accel peak &amp; RMS, gyro peaks, impact size, duration, gyro/accel ratio) — not a hand-written rule.</p>
+            <div class="row wrap">
+              <label>Model
+                <select id="clfKind"><option value="logistic">Logistic regression</option><option value="centroid">Nearest centroid</option></select>
+              </label>
+              <label>Taps per finger <input type="number" id="clfN" value="10" min="3" max="50" style="width:4em" /></label>
+            </div>
+            <div class="row wrap">
+              <button id="clfTrain" class="primary">Start training (tap J / L)</button>
+              <button id="clfAuto">Auto-train from 40 simulated taps</button>
+              <button id="clfClear">Clear live stats</button>
+            </div>
+            <div id="clfPrompt" class="prompt hidden"></div>
+            <div id="clfModelInfo" class="hint"></div>
+          </div>
+          <div class="card">
+            <h3>Training set — leave-one-out confusion</h3>
+            <div id="clfLoo"></div>
+            <div id="clfScatter"></div>
+          </div>
+          <div class="card">
+            <h3>Live taps since last reset</h3>
+            <div id="clfLive"></div>
+          </div>
+          <div class="card">
+            <h3>Tap log</h3>
+            <div id="tapLog" class="log"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-results">
+        <div class="row wrap card">
+          <button id="expResults" class="primary">Export results CSV</button>
+          <button id="expImu">Export IMU data CSV (last 120 s)</button>
+          <span class="hint">The IMU CSV uses the same columns the replay importer reads (t, ax, ay, az, gx, gy, gz, label …).</span>
+        </div>
+        <div id="resultsOut"></div>
+      </section>
+    </main>
+
+    <aside class="side">
+      <div class="card">
+        <h3>Live IMU (ESP32 over USB)</h3>
+        <p class="hint">Moves the cursor with the real MPU-6050 instead of the simulated one. The ESP32 must print <code>t,ax,ay,az,gx,gy,gz</code> lines at 921600 baud. Keep the IMU still for the first second while it calibrates. Needs Chrome or Edge.</p>
+        <div class="row wrap">
+          <button id="liveConnect" class="primary">Connect ESP32</button>
+          <button id="liveStop" disabled>Back to simulation</button>
+        </div>
+        <div id="liveInfo" class="hint"></div>
+        <div class="row wrap">
+          <button id="accelCalBtn" disabled>Calibrate accelerometer (6 faces)</button>
+          <button id="accelCalReset" class="linkbtn">Reset</button>
+        </div>
+        <div id="accelCal" class="hint"></div>
+      </div>
+
+      <div class="card deskcard">
+        <div class="row between">
+          <h3>Desk — your real hand</h3>
+          <span class="hint" id="deskMode">hover or click</span>
+        </div>
+        <canvas id="desk" width="400" height="250" title="Click to grab the hand (pointer lock). Esc releases."></canvas>
+        <p class="hint">Move your mouse here to slide the hand. <b>Click</b> to grab it (pointer lock — the real pointer disappears). Tap with <kbd>J</kbd> = index (left click), <kbd>L</kbd> = pinky (right click). Mouse buttons do the same while grabbed. <kbd>Esc</kbd> releases.</p>
+        <label class="slim">Mouse → hand scale <input type="range" id="deskSens" min="0.1" max="2" step="0.05" value="0.5" /> <span id="deskSensV"></span></label>
+      </div>
+
+      <div class="card">
+        <h3>Precision tests</h3>
+        <div class="row wrap">
+          <button id="tTarget" class="primary">Target test</button>
+          <button id="tStroke">Stroke test</button>
+          <button id="tDrift">Drift test (30 s)</button>
+          <button id="tStop" class="hidden">Stop test</button>
+        </div>
+        <div class="row wrap slimrow">
+          <label>Targets <input type="number" id="tN" value="15" min="3" max="60" style="width:4em" /></label>
+        </div>
+        <div id="testStatus" class="hint"></div>
+      </div>
+
+      <details class="card" open>
+        <summary>Pipeline steps</summary>
+        <div id="stepToggles" class="toggles"></div>
+      </details>
+
+      <details class="card">
+        <summary>Pipeline parameters</summary>
+        <div id="pipeSliders"></div>
+      </details>
+
+      <details class="card" open>
+        <summary>Sensor &amp; wrist</summary>
+        <label>Preset
+          <select id="preset">
+            <option selected>MPU-6050 on the wrist (measured)</option>
+            <option>MPU-6050</option>
+            <option>ICM-42688-P</option>
+            <option>Ideal (no noise)</option>
+          </select>
+        </label>
+        <div id="simSliders"></div>
+        <div class="row wrap"><button id="btnPower" title="New random offsets (new power-on), then recalibrate">Power-cycle sensor</button><span class="hint" id="offsetInfo"></span></div>
+      </details>
+
+      <details class="card">
+        <summary>Tap signatures</summary>
+        <div id="tapSliders"></div>
+      </details>
+
+      <details class="card">
+        <summary>Replay real data (CSV)</summary>
+        <p class="hint">Columns <code>t, ax, ay, az, gx, gy, gz[, label]</code>. t in s (ms auto-detected), accel in g (m/s² auto-detected), gyro in °/s. Label: <code>index</code>/<code>pinky</code> on the tap's rows.</p>
+        <input type="file" id="csvFile" accept=".csv,.txt" />
+        <div id="replayInfo" class="hint"></div>
+        <div class="row wrap">
+          <button id="rpPlay" disabled>Play</button>
+          <select id="rpSpeed"><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="0">instant</option></select>
+          <button id="rpTrain" disabled title="Fit the classifier on the labelled taps in this file">Train on labels</button>
+          <button id="rpExit" disabled>Back to simulation</button>
+          <button id="rpCompare" disabled title="Run this file through each cursor mode and compare what the cursor did">Compare cursor modes</button>
+        </div>
+        <div class="progress" id="rpProgress"><div></div></div>
+        <div id="rpCompareOut"></div>
+      </details>
+    </aside>
+  </div>
+  <script type="module" src="/src/ui/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "imu-gesture-mouse-sim",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Interactive simulation of a wrist-worn IMU gesture mouse (MPU-6050 + ESP32) for precision testing.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "verify": "node scripts/verify.ts",
+    "bench:real": "node scripts/bench-real.ts",
+    "bench:moves": "node scripts/bench-moves.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.2.0"
+  }
+}
