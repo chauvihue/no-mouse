@@ -134,7 +134,7 @@ export class SessionRecorder {
  */
 function guideCells(st: GuideStep | undefined): string[] {
   if (!st) return ['', '', '', '', ''];
-  const indexed = st.kind === 'move' || st.kind === 'click';
+  const indexed = st.kind === 'move' || st.kind === 'click' || st.kind === 'neg';
   return [
     st.section, st.kind, indexed ? String(st.n) : '',
     st.dir > 0 ? '+1' : st.dir < 0 ? '-1' : '0', st.click,

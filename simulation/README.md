@@ -23,7 +23,7 @@ For the presentation, copy `dist/index.html` to the laptop. It has no dependenci
 | Index tap (left click) | <kbd>J</kbd>, or the left mouse button while the hand is grabbed |
 | Pinky tap (right click) | <kbd>L</kbd>, or the right mouse button while the hand is grabbed |
 | Pause / recalibrate | <kbd>Space</kbd> / <kbd>R</kbd> |
-| Debug overlay | Shows the true path vs the estimated path (desk pad + inset). It is hidden automatically during the target test. |
+| True path | Shows the true path vs the estimated path (desk pad + inset). It is hidden automatically during the target test. |
 
 **Tests** (right panel)
 - **Target test**: Fitts-style targets in 3 sizes × 3 distances. Steer the *estimated* cursor and click with an index tap. It records hit rate, time per target, error at click, throughput, wrong-finger clicks, false clicks and missed taps.
@@ -52,7 +52,7 @@ The pipeline takes its sample rate from the board's timestamps, so it runs at th
 
 ### Accelerometer calibration
 
-Each MPU-6050 reads a little off at rest (about +0.08 g on x here, where it should read 0), and the scale differs per axis. That error looked like tilt and leaked gravity into hand-motion estimates. The **Calibrate accelerometer (6 faces)** button measures it:
+Each MPU-6050 reads a little off at rest (about +0.08 g on x here, where it should read 0), and the scale differs per axis. That error looked like tilt and leaked gravity into hand-motion estimates. The **Accel calibration** tool (Live IMU card → Tools) measures it:
 
 1. Rest the board on one of its six faces and keep it still for 2 s. Any order works. The card shows which faces are done (`+X ✓ −X … `).
 2. Repeat on the other five faces until all six show ✓.
@@ -62,29 +62,33 @@ If a bias is over 150 mg or a scale is outside 90–110 %, the result is rejecte
 
 ### Click tester
 
-Under the live IMU card, **Click tester** (enabled while the ESP32 is connected) opens a panel that checks left and right clicks live, without touching the cursor pipeline:
+In the Live IMU card, the **Click tester** tool (enabled while the ESP32 is connected) opens a panel that checks left and right clicks live, without touching the cursor pipeline:
 
-- **LEFT · index** and **RIGHT · pinky** pads flash and count each detected click. Below them: the last click's peak (g) and its confidence, and a strip of the last 3 s of high-passed accel magnitude with the detection threshold (dashed) and each detected tap coloured by side.
-- The first 2 s after opening it need a still hand (calibration). **Recalibrate** repeats that. **Sensitivity** (0.5×–2×) scales the thresholds: 2× finds weaker taps and also more false ones.
+- **LEFT · index** and **RIGHT · pinky** pads flash and count each detected click. Below them: the last click's peak (g) and its confidence, and a strip of the last 3 s of the 20 Hz high-passed accel magnitude (the tap band) with the detection threshold (dashed) and each detected tap coloured by side.
+- Start-up takes about 1.5 s (history for the detector and a noise estimate). **Recalibrate** measures the noise level again. **Sensitivity** (0.5×–2×) lowers (above 1×) or raises the amplitude threshold and the tap test: 2× finds lighter taps and also more false ones. It never changes which finger a tap is assigned to.
+- **Teach…** (about 40 s) adapts the detector to you: 5 index taps, 5 pinky taps (a beep with each prompt, high for index, low for pinky), 3 s of a completely still hand and 3 s of moving, lifting and sliding the hand without tapping. The class centres move towards your own taps, the tap test is adjusted so your softest tap passes and the strongest non-tap is refused, and the amplitude floor drops to 0.6× your softest tap if that is below the default. The result is kept in this browser's localStorage (`wml.clickProfile.v1`) and applied every time the tester opens; **Forget teaching** returns to the trained default. If fewer than 3 taps of a kind are heard, nothing changes.
 - **Quiz mode** prompts LEFT or RIGHT every 2.5 s with a beep (high for LEFT, low for RIGHT; **Sound** turns it off) and scores each prompt: a click that peaks within 1.5 s of the prompt is correct or a wrong side; no click is missed. Extra clicks outside the windows are counted separately. **Reset** clears the counts and the quiz.
 
-How it works (`../algorithms/clicks/detector.ts`, a streaming version of the rule in `scripts/analyze-clicks.ts`):
+How it works (`../algorithms/clicks/detector.ts`; `../algorithms/README.md` has the full description):
 
-1. A 5 Hz high-pass on each accel and gyro axis (30 Hz on accel for the sharpness test). The noise floor is the rms of the still hand, averaged over the calibration and then slowly while the hand is quiet.
-2. A tap is the largest accel magnitude within ±100 ms of its peak, and must be at least 5× the noise rms, have a sharp 30 Hz onset, stay above half its peak for at most 80 ms, and show a gyro transient of 4× the noise rms. A 150 ms refractory period follows each tap. The decision comes 100 ms after the peak, so the detector is causal.
-3. Each tap gets 16 raw features over ±100 ms (per-axis peak-to-peak, max and min, accel and gyro peaks, energy). A logistic regression on the five most separable of them (`../algorithms/clicks/model.ts`) gives P(left). Index taps are L, pinky taps are R.
+1. Filters on every reading: accel 20 Hz high-pass (the tap band), 5 Hz high-pass, 1–10 Hz band (slow motion); gyro 2 Hz high-pass magnitude (motion) and 20 Hz high-pass.
+2. A candidate is the largest tap-band accel peak within ±150 ms, above max(0.05 g, 8 × noise) / sensitivity, where the noise is the median of 10 ms maxima over the last 6 s (a still hand sets it; a brief movement does not).
+3. 150 ms after the peak a logistic **tap test** looks at the quiet before the peak, the 1 s of history, how long the ring lasts and whether it has died away 100–150 ms later. Sliding, lifting and rotating leave sustained vibration or slow motion and fail it.
+4. A linear discriminant on the tap's peak amplitude and its 5 Hz / 20 Hz band ratio decides index (L) or pinky (R). Neither stage depends on the sensitivity setting for the finger decision.
 
-To retrain after recording new guided clicks takes (`npm run train:clicks`, or pass the CSV paths after `--`): the script runs the same detector over the recordings, labels each click window from `guide_click`, reports detections, false events and cross-take accuracy (train on one take, test on the other), then rewrites `../algorithms/clicks/model.ts`. Do not edit that file by hand.
+Check the live path without hardware: `npm run replay:clicks` feeds recordings through the same parser, rate probe and detector construction the page uses and checks the result against the offline numbers (also lost lines, a moving hand during start-up, sensitivity and the teach step).
+
+To retrain after recording new guided clicks takes (`npm run train:clicks`, or pass the CSV paths after `--`; `--dry` prints without rewriting): the script reads every `clicks_*`, `clicks2_*` and `panning_*` recording in `../data`, finds candidates with the same detector, labels click windows from `guide_click`, treats clicks v2 non-click windows and the panning takes as negatives, reports leave-one-recording-out numbers (detection, side accuracy, events per minute on panning and in pauses, a 0.5× softer tap simulation, sensitivity 0.75 / 1.5), then rewrites `../algorithms/clicks/model.ts`. Do not edit that file by hand. `npm run analyze:clicks` is the older offline analysis of the click takes.
 
 ### Recording a session
 
-**● Record** (top bar) saves every sample from Record to Stop (up to 10 minutes) as `imu_session_<time>.csv`: the raw reading (`t, ax…gz`), what the pipeline made of it (`lin_x/y` hand acceleration, `vel_x/y`, `pos_x/y`), the cursor (`cursor_x/y_px`), the `still` / `frozen` flags and any `tap_detected`. A comment line at the top names the input and cursor mode. It works for live, simulated and replayed data; simulated runs also fill `true_x_m, true_y_m`.
+The **Recorder** tool (Live IMU card → Tools, mode **Free**) saves every sample from Start to Stop (up to 10 minutes) as `imu_session_<time>.csv`: the raw reading (`t, ax…gz`), what the pipeline made of it (`lin_x/y` hand acceleration, `vel_x/y`, `pos_x/y`), the cursor (`cursor_x/y_px`), the `still` / `frozen` flags and any `tap_detected`. A comment line at the top names the input and cursor mode. It works for live, simulated and replayed data; simulated runs also fill `true_x_m, true_y_m`.
 
 A recording loads straight back into **Replay real data**. **Compare cursor modes** runs the file through each mode and reports how long the cursor sat on a screen edge, how far it ended from where it started, and its top speed. End a recording with your hand back where it started and *start→end* becomes a drift measure.
 
 ### Guided panning recording
 
-Under the live IMU card, pick a script, then **▶ Start guided recording**. A 3-2-1 countdown runs (ticks), then the script plays on a full-screen panel with a countdown for each step, the section and progress, the next step, and (for moves) a pacing dot that travels from the left mark to the right mark over the move. Beeps: high at each move, L/R pitches at each click, low at each pause, rest, still or tilt step. **Sound** turns them off. Recording starts when step 1 begins and stops (and saves) when the script ends. **Stop guide** (or the live Record button) ends it early; an early stop is saved as `_aborted`.
+Open the **Recorder** tool (Live IMU card → Tools), choose **Guided**, pick a script, then **Start**. Guided mode needs the ESP32 connected. A 3-2-1 countdown runs (ticks), then the script plays on a full-screen panel with a countdown for each step, the section and progress, the next step, and (for moves) a pacing dot that travels from the left mark to the right mark over the move. Beeps: high at each move, L/R pitches at each click, low at each pause, rest, still or tilt step. **Sound** turns them off. Recording starts when step 1 begins and stops (and saves) when the script ends. **Stop guide** (or the ● Stop pill in the top bar) ends it early; an early stop is saved as `_aborted`.
 
 Two scripts:
 
@@ -107,11 +111,24 @@ Two scripts:
 | mixed | 20 taps, 10 L + 10 R in a shuffled order (fixed seed, so every run has the same order), each followed by a 1.5 s pause; then a 4 s rest |
 | end | still 5 s, "Hold still — finishing" |
 
-The scripts are data in `src/ui/guide.ts` (`panningSteps`, `clicksSteps`).
+**clicks v2** (`clicks2`; the same hand position; collects what the tap test and soft taps need):
 
-**Files.** A guided run saves `<script>_take<NN>_<YYYY-MM-DD>_<HH-MM-SS>.csv`, for example `panning_take01_2026-11-27_14-05-33.csv`. The take number is counted separately for each script and kept in this browser's localStorage; the next number is shown next to the script menu, and **reset count** sets both back to 01. The time is the local time when the run started. A run that was stopped early is saved with `_aborted` before `.csv`. The take counter only moves on when a file is actually saved. Ordinary **● Record** recordings keep the `imu_session_<time>.csv` name.
+| Section | Steps |
+|---|---|
+| start | still 5 s |
+| firm | 20 taps, 10 L + 10 R shuffled (seed 11), each 1.0 s + 1.5 s pause; then a 4 s rest |
+| soft | 20 SOFT taps, 10 L + 10 R shuffled (seed 12), same timing; then a 4 s rest |
+| lift, slide, rotate, palm, thumb, otherfinger | 6 × [non-click motion 2.0 s (lift 2 s, slide 1 s, rotate 2 s, palm 1 s, thumb 1 s, middle/ring finger 1 s), pause 1.5 s]. Labelled `guide_step` = `neg`, the section names the motion |
+| rest | still 8 s |
+| end | still 5 s |
 
-**CSV columns.** Guided rows add `guide_section` (start, quick, … / left, right, mixed / tilt, end), `guide_step` (`still`, `move`, `pause`, `tilt`, `click`), `guide_move` (the move index for panning moves, the click index for clicks; empty otherwise), `guide_dir` (`+1` / `-1` for panning moves, `0` otherwise) and `guide_click` (`L` / `R` for clicks, empty otherwise). Each sample is labelled with the step active when it was processed. Rows from ordinary recordings leave these columns empty. The first comment lines name the script, its timings, the take number and the local start time. The columns are added at the end of the header, so the importers and the bench scripts still find the other columns by name.
+About 3.8 minutes. `scripts/train-clicks.ts` uses these files automatically when they are in `../data` (named `clicks2_take..._….csv`); v1 stays selectable and unchanged.
+
+The scripts are data in `src/ui/guide.ts` (`panningSteps`, `clicksSteps`, `clicks2Steps`).
+
+**Files.** A guided run saves `<script>_take<NN>_<YYYY-MM-DD>_<HH-MM-SS>.csv`, for example `panning_take01_2026-11-27_14-05-33.csv`. The take number is counted separately for each script and kept in this browser's localStorage; the next number is shown next to the script menu, and **reset count** sets both back to 01. The time is the local time when the run started. A run that was stopped early is saved with `_aborted` before `.csv`. The take counter only moves on when a file is actually saved. Free recordings keep the `imu_session_<time>.csv` name.
+
+**CSV columns.** Guided rows add `guide_section` (start, quick, … / left, right, mixed / firm, soft, lift, slide, rotate, palm, thumb, otherfinger, rest / tilt, end), `guide_step` (`still`, `move`, `pause`, `tilt`, `click`, `neg`), `guide_move` (the move index for panning moves, the click index for clicks, the repeat for non-click motions; empty otherwise), `guide_dir` (`+1` / `-1` for panning moves, `0` otherwise) and `guide_click` (`L` / `R` for clicks, empty otherwise). Each sample is labelled with the step active when it was processed. Rows from ordinary recordings leave these columns empty. The first comment lines name the script, its timings, the take number and the local start time. The columns are added at the end of the header, so the importers and the bench scripts still find the other columns by name.
 
 ### Cursor modes (Pipeline steps → Fusion mode)
 
@@ -206,7 +223,7 @@ Costs and limits: on the real recording the score is about the same (gyro 15.8 �
 
 ### Real recordings
 
-Recordings made with **● Record** go in `Final_Project/data/`. `npm run bench:real` replays each one through the stroke-tracker and plain-integration setups and scores the phases where the hand swung back and forth between two marks: the number of swings, the mean swing against the true length, the swing-to-swing scatter, the sideways spread and the drift. The phase times of each recording are listed at the top of `scripts/bench-real.ts`.
+Recordings made with the **Recorder** go in `Final_Project/data/`. `npm run bench:real` replays each one through the stroke-tracker and plain-integration setups and scores the phases where the hand swung back and forth between two marks: the number of swings, the mean swing against the true length, the swing-to-swing scatter, the sideways spread and the drift. The phase times of each recording are listed at the top of `scripts/bench-real.ts`.
 
 Recording 1 (Nov 25, 74 s): plain integration runs away by 11–50 m. The stroke tracker measures the real 10 cm swings as 10.4 ± 4.7 cm (accel-only Kalman) and 10.6 ± 4.1 cm (Madgwick) right/left, and 9.4 ± 4.9 / 11.1 ± 3.8 cm forward/back. Still weak: 15–18 cm of sideways spread in forward/back, and up to 77 cm of drift during fast nonstop back-and-forth with no pause.
 
@@ -252,7 +269,7 @@ Axes: x = hand right, y = forward (toward the fingers), z = up out of the back o
   fusion/         madgwick.ts, gravity.ts (accel-only gravity tracking)
   motion/stroke.ts  stroke tracker: speed-up → slow-down → halt, velocity exactly 0 between strokes
   taps/classifier.ts  tap features + classifier
-  clicks/         left/right click detector and its trained model
+  clicks/         left/right click detector, trained models, live feed and teach step
   calibration/    six-face accelerometer calibration maths
   shared/math.ts  quaternion helpers
 src/sim/        ← the physics: true hand → simulated MPU-6050 readings

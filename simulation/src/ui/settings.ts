@@ -1,12 +1,13 @@
 // Slider / toggle builders bound to the live config objects.
 
 import type { PipelineConfig } from '../../../algorithms/config.ts';
+import { addInfo } from './info.ts';
 import type { SimConfig, TapSignature } from '../sim/imu.ts';
 
 export interface SliderSpec {
   label: string; min: number; max: number; step: number;
   get: () => number; set: (v: number) => void;
-  fmt?: (v: number) => string; tip?: string;
+  fmt?: (v: number) => string; tip?: string; key?: string;
 }
 
 export interface Bound { el: HTMLElement; refresh: () => void }
@@ -14,10 +15,10 @@ export interface Bound { el: HTMLElement; refresh: () => void }
 export function slider(spec: SliderSpec, onChange?: () => void): Bound {
   const row = document.createElement('div');
   row.className = 'sl';
-  if (spec.tip) row.title = spec.tip;
   const lab = document.createElement('label');
   lab.textContent = spec.label;
   const inp = document.createElement('input');
+  if (spec.key) addInfo(lab, spec.key);
   inp.type = 'range'; inp.min = String(spec.min); inp.max = String(spec.max); inp.step = String(spec.step);
   inp.setAttribute('aria-label', spec.label);
   const val = document.createElement('span');
@@ -47,7 +48,7 @@ type Num<T> = { [K in keyof T]: T[K] extends number ? K : never }[keyof T];
 export function buildPipelineSliders(host: HTMLElement, P: () => PipelineConfig, onChange: () => void): Bound[] {
   const b: Bound[] = [];
   const add = (key: Num<PipelineConfig>, label: string, min: number, max: number, step: number, fmt: (v: number) => string, tip?: string, scale = 1) => {
-    const s = slider({ label, min, max, step, fmt: v => fmt(v), tip, get: () => (P()[key] as number) * scale, set: v => { (P()[key] as number) = v / scale; } }, onChange);
+    const s = slider({ key: `p.${key}`, label, min, max, step, fmt: v => fmt(v), tip, get: () => (P()[key] as number) * scale, set: v => { (P()[key] as number) = v / scale; } }, onChange);
     host.appendChild(s.el); b.push(s);
   };
   host.appendChild(heading('1–2 · Calibration & fusion'));
@@ -102,7 +103,7 @@ export function buildPipelineSliders(host: HTMLElement, P: () => PipelineConfig,
 export function buildSimSliders(host: HTMLElement, S: () => SimConfig, onChange: () => void): Bound[] {
   const b: Bound[] = [];
   const add = (key: Num<SimConfig>, label: string, min: number, max: number, step: number, fmt: (v: number) => string, tip?: string) => {
-    const s = slider({ label, min, max, step, fmt, tip, get: () => S()[key] as number, set: v => { (S()[key] as number) = v; } }, onChange);
+    const s = slider({ key: `s.${key}`, label, min, max, step, fmt, tip, get: () => S()[key] as number, set: v => { (S()[key] as number) = v; } }, onChange);
     host.appendChild(s.el); b.push(s);
   };
   host.appendChild(heading('Sensor errors'));
@@ -128,21 +129,21 @@ export function buildSimSliders(host: HTMLElement, S: () => SimConfig, onChange:
 export function buildTapSliders(host: HTMLElement, S: () => SimConfig, onChange: () => void): Bound[] {
   const b: Bound[] = [];
   const push = (s: Bound) => { host.appendChild(s.el); b.push(s); };
-  push(slider({ label: 'Index ↔ pinky similarity', min: 0, max: 1, step: 0.01, fmt: v => `${(v * 100).toFixed(0)} %`,
+  push(slider({ key: 't.tapSimilarity', label: 'Index ↔ pinky similarity', min: 0, max: 1, step: 0.01, fmt: v => `${(v * 100).toFixed(0)} %`,
     tip: '0 = each finger has its own signature, 100 % = identical (classification becomes a coin flip)',
     get: () => S().tapSimilarity, set: v => { S().tapSimilarity = v; } }, onChange));
-  push(slider({ label: 'Tap-to-tap variation', min: 0, max: 0.6, step: 0.01, fmt: v => `${(v * 100).toFixed(0)} %`,
+  push(slider({ key: 't.tapVariation', label: 'Tap-to-tap variation', min: 0, max: 0.6, step: 0.01, fmt: v => `${(v * 100).toFixed(0)} %`,
     get: () => S().tapVariation, set: v => { S().tapVariation = v; } }, onChange));
-  const finger = (name: string, sig: () => TapSignature) => {
+  const finger = (name: string, fk: 'tapIndex' | 'tapPinky', sig: () => TapSignature) => {
     host.appendChild(heading(name));
-    (['x', 'y', 'z'] as const).forEach((ax, i) => push(slider({ label: `accel ${ax}`, min: -2, max: 2, step: 0.05, fmt: f2('g'),
+    (['x', 'y', 'z'] as const).forEach((ax, i) => push(slider({ key: `t.${fk}.accel.${ax}`, label: `accel ${ax}`, min: -2, max: 2, step: 0.05, fmt: f2('g'),
       get: () => sig().accel[i], set: v => { sig().accel[i] = v; } }, onChange)));
-    (['x', 'y', 'z'] as const).forEach((ax, i) => push(slider({ label: `gyro ${ax}`, min: -150, max: 150, step: 1, fmt: f0('°/s'),
+    (['x', 'y', 'z'] as const).forEach((ax, i) => push(slider({ key: `t.${fk}.gyro.${ax}`, label: `gyro ${ax}`, min: -150, max: 150, step: 1, fmt: f0('°/s'),
       get: () => sig().gyro[i], set: v => { sig().gyro[i] = v; } }, onChange)));
-    push(slider({ label: 'ring frequency', min: 40, max: 200, step: 1, fmt: f0('Hz'), get: () => sig().freqHz, set: v => { sig().freqHz = v; } }, onChange));
-    push(slider({ label: 'decay', min: 2, max: 20, step: 0.5, fmt: f1('ms'), get: () => sig().decayMs, set: v => { sig().decayMs = v; } }, onChange));
+    push(slider({ key: `t.${fk}.freqHz`, label: 'ring frequency', min: 40, max: 200, step: 1, fmt: f0('Hz'), get: () => sig().freqHz, set: v => { sig().freqHz = v; } }, onChange));
+    push(slider({ key: `t.${fk}.decayMs`, label: 'decay', min: 2, max: 20, step: 0.5, fmt: f1('ms'), get: () => sig().decayMs, set: v => { sig().decayMs = v; } }, onChange));
   };
-  finger('Index tap (J)', () => S().tapIndex);
-  finger('Pinky tap (L)', () => S().tapPinky);
+  finger('Index tap (J)', 'tapIndex', () => S().tapIndex);
+  finger('Pinky tap (L)', 'tapPinky', () => S().tapPinky);
   return b;
 }

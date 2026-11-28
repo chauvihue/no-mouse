@@ -1,10 +1,15 @@
 // Click tester: checks the left (index) and right (pinky) click detector live on the real IMU.
-// It runs the streaming detector and model that scripts/train-clicks.ts fits
+// It runs the streaming detector and models that scripts/train-clicks.ts fits
 // (algorithms/clicks/detector.ts, algorithms/clicks/model.ts), fed beside the normal live pipeline, which is
-// not changed. Opened from the Live IMU card while the ESP32 is connected.
+// not changed. Opened from the Live IMU card while the ESP32 is connected. "Teach" adapts the detector to
+// the user (algorithms/clicks/teach.ts) and keeps the result in localStorage.
 
-import { ClickDetector, DECISION_DELAY_S } from '../../../algorithms/clicks/detector.ts';
-import type { ClickEvent, ImuReading, Side } from '../../../algorithms/clicks/detector.ts';
+import { DECISION_DELAY_S } from '../../../algorithms/clicks/detector.ts';
+import type { ClickDetector, ClickEvent, ClickProfile, ImuReading, Side } from '../../../algorithms/clicks/detector.ts';
+import { ClickEngine } from '../../../algorithms/clicks/engine.ts';
+import { CLICK_MODEL } from '../../../algorithms/clicks/model.ts';
+import { buildProfile, parseProfile } from '../../../algorithms/clicks/teach.ts';
+import type { TeachSummary } from '../../../algorithms/clicks/teach.ts';
 import { theme } from './theme.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -18,6 +23,31 @@ const BEEP_HZ: Record<Side, number> = { L: 990, R: 660 }; // same pitches as the
 
 interface Prompt { side: Side; t: number; hit: ClickEvent | null; done: boolean }
 interface Result { truth: Side; pred: Side | 'missed' }
+
+// Teach: 5 index taps, 5 pinky taps, a still hand, a moving hand. Times are device seconds.
+type TeachKind = 'ready' | 'L' | 'R' | 'still' | 'move';
+interface TeachStep { kind: TeachKind; dur: number; text: string; t0: number }
+const TEACH_TAP_S = 2.2;        // one tap prompt; the tap may land up to ~1.4 s after the beep
+const TEACH_SKIP_S = 0.4;       // events this soon after a still/move step starts are ignored
+const TEACH_KEY = 'wml.clickProfile.v1';
+interface Teach { steps: TeachStep[]; end: number; events: ClickEvent[]; prevSens: number }
+interface Stored { profile: ClickProfile; summary: TeachSummary; taught: string }
+
+function loadStored(): Stored | null {
+  if (!CLICK_MODEL) return null;
+  try {
+    const raw = localStorage.getItem(TEACH_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as { profile?: unknown; summary?: TeachSummary; taught?: string };
+    const profile = parseProfile(o.profile, CLICK_MODEL);
+    return profile && o.summary ? { profile, summary: o.summary, taught: String(o.taught ?? '') } : null;
+  } catch { return null; }
+}
+function saveStored(v: Stored | null): void {
+  try {
+    if (v) localStorage.setItem(TEACH_KEY, JSON.stringify(v)); else localStorage.removeItem(TEACH_KEY);
+  } catch { /* storage blocked: the profile lasts until the page closes */ }
+}
 
 /** One short tone, same envelope as the guided recording's beeps. */
 function beepTone(ctx: AudioContext, freq: number): void {
@@ -43,7 +73,10 @@ export class ClickTester {
   private readonly strip = $<HTMLCanvasElement>('ctStrip');
 
   private open = false;
-  private det: ClickDetector | null = null;
+  private readonly engine = new ClickEngine();
+  private det: ClickDetector | null = null;   // the engine's detector, once the first reading has arrived
+  private stored: Stored | null = loadStored();
+  private teach: Teach | null = null;
   private lastT = 0;                       // device time of the newest reading
   private raf = 0;
   private counts: Record<Side, number> = { L: 0, R: 0 };
@@ -56,10 +89,13 @@ export class ClickTester {
     this.btn.addEventListener('click', () => this.openTester());
     $('ctClose').addEventListener('click', () => this.close());
     $('ctRecal').addEventListener('click', () => this.det?.recalibrate());
+    $('ctTeach').addEventListener('click', () => { if (this.teach) this.endTeach(false); else this.startTeach(); });
+    $('ctForget').addEventListener('click', () => this.forget());
+    this.engine.setProfile(this.stored?.profile ?? null);
     $('ctReset').addEventListener('click', () => this.resetStats());
     this.sensInput.addEventListener('input', () => {
       const v = Number(this.sensInput.value);
-      if (this.det) this.det.sensitivity = v;
+      if (!this.teach) this.engine.setSensitivity(v);
       $('ctSensV').textContent = `${v.toFixed(2)}×`;
     });
     this.quizBox.addEventListener('change', () => this.setQuiz(this.quizBox.checked));
@@ -76,18 +112,24 @@ export class ClickTester {
   /** Called for every live reading that goes through the pipeline. rateHz is the measured board rate. */
   feed(s: ImuReading, rateHz: number): void {
     if (!this.open || !(rateHz > 0)) return;
-    const det = this.det ?? (this.det = new ClickDetector({ sampleRateHz: rateHz, sensitivity: Number(this.sensInput.value) }));
+    const e = this.engine.feed(s, rateHz);
+    this.det = this.engine.det;
     this.lastT = s.t;
+    if (this.teach) this.teachTick(s.t);
     if (this.quiz.on) this.quizTick(s.t);
-    const e = det.step(s);
-    if (e) this.onClick(e);
+    if (!e) return;
+    if (this.teach) this.teach.events.push(e);   // teaching sees every candidate, accepted or not, and counts none as clicks
+    else this.onClick(e);
   }
 
   private openTester(): void {
     if (this.open || this.btn.disabled) return;
     this.open = true;
+    this.engine.reset();
+    this.engine.setSensitivity(Number(this.sensInput.value));
     this.det = null;
     this.resetStats();
+    this.showTeachInfo();
     this.overlay.classList.remove('hidden');
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -97,6 +139,8 @@ export class ClickTester {
     this.open = false;
     cancelAnimationFrame(this.raf);
     this.overlay.classList.add('hidden');
+    if (this.teach) this.endTeach(false);
+    this.engine.reset();
     this.det = null;
     this.quiz.on = false;
     this.quiz.prompt = null;
@@ -129,6 +173,7 @@ export class ClickTester {
   // ── quiz ──────────────────────────────────────────────────────────────────
 
   private setQuiz(on: boolean): void {
+    if (on && this.teach) { this.quizBox.checked = false; return; }
     this.quiz.on = on;
     this.quiz.prompt = null;
     this.quiz.next = 0;
@@ -177,6 +222,114 @@ export class ClickTester {
       : '');
   }
 
+  // ── teach ─────────────────────────────────────────────────────────────────
+
+  private startTeach(): void {
+    const det = this.det;
+    if (!CLICK_MODEL || !det || det.calibrating) { $('ctTeachInfo').textContent = 'Wait for the start-up to finish, then press Teach again.'; return; }
+    this.quizBox.checked = false;
+    this.setQuiz(false);
+    try {
+      this.audio ??= new AudioContext();
+      void this.audio.resume();
+    } catch { /* no audio: the prompts are shown without beeps */ }
+    const steps: TeachStep[] = [{ kind: 'ready', dur: 2, text: 'Rest your hand on the desk', t0: 0 }];
+    for (const side of ['L', 'R'] as const) {
+      for (let k = 1; k <= 5; k++) steps.push({ kind: side, dur: TEACH_TAP_S, text: `Tap ${LABEL[side]} (${k}/5)`, t0: 0 });
+    }
+    steps.push({ kind: 'still', dur: 3, text: 'Keep the hand completely still', t0: 0 });
+    steps.push({ kind: 'move', dur: 3, text: 'Lift, slide and rotate your hand around — no taps', t0: 0 });
+    let t = this.lastT + 0.5;
+    for (const st of steps) { st.t0 = t; t += st.dur; }
+    // every candidate is wanted while teaching: lower the amplitude floor, relax the gate, return refused ones too
+    this.teach = { steps, end: t, events: [], prevSens: this.engine.sensitivity };
+    this.engine.sensitivity = 2;
+    this.engine.setSensitivity(2);
+    this.engine.setProfile({ ampMinG: 0.03 });
+    det.rejectedEvents = true;
+    this.beepedStep = -1;
+    this.markers = [];
+    $('ctTeach').textContent = 'Cancel teaching';
+  }
+
+  private beepedStep = -1;
+
+  private teachStepAt(t: number): number {
+    const tc = this.teach!;
+    for (let i = tc.steps.length - 1; i >= 0; i--) if (t >= tc.steps[i].t0) return i;
+    return -1;
+  }
+
+  private teachTick(t: number): void {
+    const tc = this.teach;
+    if (!tc) return;
+    const i = this.teachStepAt(t);
+    if (i >= 0 && i !== this.beepedStep) {
+      this.beepedStep = i;
+      const k = tc.steps[i].kind;
+      if ((k === 'L' || k === 'R') && this.soundBox.checked && this.audio) {
+        try { beepTone(this.audio, BEEP_HZ[k]); } catch { /* audio blocked */ }
+      }
+    }
+    if (t >= tc.end + DECISION_DELAY_S + 0.05) this.endTeach(true);
+  }
+
+  /** Stops teaching; with `finished` the events collected are turned into a profile and saved. */
+  private endTeach(finished: boolean): void {
+    const tc = this.teach;
+    if (!tc) return;
+    this.teach = null;
+    $('ctTeach').textContent = 'Teach…';
+    if (this.det) this.det.rejectedEvents = false;
+    this.engine.setProfile(this.stored?.profile ?? null);
+    this.engine.setSensitivity(tc.prevSens);
+    if (!finished || !CLICK_MODEL) { this.showTeachInfo(finished ? '' : 'Teaching cancelled.'); return; }
+
+    const taps: { side: Side; ev: ClickEvent }[] = [];
+    const negatives: ClickEvent[] = [];
+    for (const st of tc.steps) {
+      const inStep = tc.events.filter(e => e.t >= st.t0 && e.t < st.t0 + st.dur);
+      if (st.kind === 'L' || st.kind === 'R') {
+        if (inStep.length) taps.push({ side: st.kind, ev: inStep.reduce((a, e) => (e.peakG > a.peakG ? e : a)) });
+      } else if (st.kind === 'still' || st.kind === 'move') {
+        negatives.push(...inStep.filter(e => e.t >= st.t0 + TEACH_SKIP_S));
+      }
+    }
+    const nL = taps.filter(x => x.side === 'L').length, nR = taps.filter(x => x.side === 'R').length;
+    if (nL < 3 || nR < 3) {
+      this.showTeachInfo(`Teaching failed: heard ${nL} index and ${nR} pinky taps (need at least 3 of each). The previous setting is kept — try again with firmer taps or a higher sensitivity.`);
+      return;
+    }
+    const { profile, summary } = buildProfile(CLICK_MODEL, { taps, negatives });
+    this.stored = { profile, summary, taught: new Date().toISOString() };
+    saveStored(this.stored);
+    this.engine.setProfile(profile);
+    this.showTeachInfo();
+  }
+
+  private forget(): void {
+    if (this.teach) this.endTeach(false);
+    this.stored = null;
+    saveStored(null);
+    this.engine.setProfile(null);
+    this.showTeachInfo('Back to the trained default.');
+  }
+
+  private showTeachInfo(note = ''): void {
+    const st = this.stored;
+    let text = st
+      ? (() => {
+        const s = st.summary;
+        const g = (v: number | null) => (v === null ? '—' : `${v.toFixed(2)} g`);
+        return `Personal setting taught ${st.taught.slice(0, 16).replace('T', ' ')} UTC: index ${g(s.peakL)} (${s.nL} taps), pinky ${g(s.peakR)} (${s.nR} taps), ${s.nNeg} non-tap events seen, tap test ${s.gateShift >= 0 ? '+' : ''}${s.gateShift.toFixed(1)}, amplitude floor ${s.ampMinG.toFixed(3)} g${s.overlap ? ' — some non-taps looked like your softest tap, so those may still count' : ''}.`;
+      })()
+      : (CLICK_MODEL ? 'Using the trained default. Teach… adapts it to you in about 40 s.' : 'No trained model: run npm run train:clicks.');
+    if (note) text = `${note} ${text}`;
+    $('ctTeachInfo').textContent = text;
+    $('ctForget').classList.toggle('hidden', !st);
+    ($('ctTeach') as HTMLButtonElement).disabled = !CLICK_MODEL;
+  }
+
   // ── per-frame drawing ─────────────────────────────────────────────────────
 
   private resetStats(): void {
@@ -203,11 +356,10 @@ export class ClickTester {
     $('ctCalBar').style.width = `${(det ? det.calibrationProgress() : 0) * 100}%`;
 
     let state = 'Waiting for readings…';
-    if (det && calibrating) state = 'Calibrating · keep the hand still';
+    if (det && calibrating) state = 'Starting up · rest the hand';
     else if (det) {
-      const thr = det.threshold();
-      const noise = det.noiseRms();
-      state = `Live · ${det.fs} Hz · threshold ${thr.toFixed(3)} g · noise ${noise ? noise.acc5.toFixed(4) : '—'} g rms`;
+      const noise = det.noiseUnitG();
+      state = `Live · ${det.fs} Hz · peak threshold ${det.threshold().toFixed(3)} g · noise ${noise === null ? '—' : noise.toFixed(4)} g · ${this.stored ? 'personal setting' : 'trained default'}`;
     }
     $('ctState').textContent = state;
 
@@ -218,9 +370,14 @@ export class ClickTester {
       : 'No click yet.';
 
     const prompt = $('ctPrompt');
-    prompt.classList.toggle('hidden', !this.quiz.on);
+    prompt.classList.toggle('hidden', !this.quiz.on && !this.teach);
     const p = this.quiz.prompt;
-    if (this.quiz.on) {
+    if (this.teach) {
+      const i = this.teachStepAt(this.lastT);
+      const st = i >= 0 ? this.teach.steps[i] : null;
+      prompt.className = `ct-prompt${st && (st.kind === 'L' || st.kind === 'R') ? ' ' + st.kind.toLowerCase() : ''}`;
+      prompt.textContent = st ? `Teach ${Math.max(0, i)}/${this.teach.steps.length - 1} · ${st.text}` : 'Teach: get ready…';
+    } else if (this.quiz.on) {
       prompt.className = `ct-prompt${p ? ' ' + p.side.toLowerCase() : ''}`;
       prompt.textContent = !p ? (calibrating ? 'Quiz starts after calibration' : 'Get ready…')
         : !p.done ? `Click ${LABEL[p.side]} now`
@@ -244,7 +401,7 @@ export class ClickTester {
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
 
-    const { t: ts, acc5 } = this.det.recent(STRIP_S);
+    const { t: ts, acc: acc5 } = this.det.recent(STRIP_S);
     const thr = this.det.threshold();
     const tEnd = this.lastT, tStart = tEnd - STRIP_S;
     let top = 0;
@@ -261,7 +418,7 @@ export class ClickTester {
     g.moveTo(0, h - 16 + 0.5); g.lineTo(w, h - 16 + 0.5);
     g.stroke();
 
-    // acc5 trace
+    // tap-band accel magnitude trace
     g.strokeStyle = t.ink2;
     g.lineWidth = 1.2;
     g.beginPath();

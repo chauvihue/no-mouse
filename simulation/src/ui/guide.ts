@@ -1,21 +1,22 @@
 // Guided recording: a timed on-screen script that tells the user what to do while the live
-// IMU is recorded. Two scripts: "panning" (slide between two marks 10 cm apart, with pauses)
-// and "clicks" (hand stays on the paper, tap index = left click or pinky = right click).
+// IMU is recorded. Three scripts: "panning" (slide between two marks 10 cm apart, with pauses),
+// "clicks" (hand stays on the paper, tap index = left click or pinky = right click) and "clicks2"
+// (clicks v2: firm and soft taps in shuffled order, plus labelled non-click motions as negatives).
 // Every recorded sample is labelled with the step active when it was processed.
 //
 // All times are measured from one performance.now() reference: the countdown starts at the
 // button click and every step boundary is an offset from the end of the countdown.
 
-export type ScriptId = 'panning' | 'clicks';
-export type StepKind = 'still' | 'move' | 'pause' | 'tilt' | 'click';
+export type ScriptId = 'panning' | 'clicks' | 'clicks2';
+export type StepKind = 'still' | 'move' | 'pause' | 'tilt' | 'click' | 'neg';
 
 export interface GuideStep {
   kind: StepKind;
-  section: string;   // 'start' | speed name | 'left' | 'right' | 'mixed' | 'tilt' | 'end'
+  section: string;   // 'start' | speed name | 'left' | 'right' | 'mixed' | 'tilt' | 'end' | v2: 'firm' | 'soft' | 'lift' | 'slide' | 'rotate' | 'palm' | 'thumb' | 'otherfinger' | 'rest'
   seconds: number;
   dir: 1 | -1 | 0;   // panning move direction: +1 left→right, -1 right→left, 0 for non-moves
   click: 'L' | 'R' | '';  // click steps: which button (index = L, pinky = R)
-  unit: 'move' | 'click'; // what the index counts in its section
+  unit: 'move' | 'click'; // what the index counts in its section ('neg' steps count as 'move')
   n: number;         // index within the section (1..of); for pauses/rest, the one they follow
   of: number;        // how many in the section
   text: string;
@@ -151,6 +152,56 @@ function clicksSteps(): GuideStep[] {
   ];
 }
 
+
+// ── clicks v2 ───────────────────────────────────────────────────────────────
+// Adds what v1 lacks for training the tap/not-a-tap test and for soft taps: firm and soft index/pinky taps
+// in shuffled order, and non-click motions labelled as negatives (guide_step "neg", the section names the
+// motion). scripts/train-clicks.ts reads the labels from the CSV columns, so the order here is free to change.
+const V2_FIRM = 20;      // firm taps, 10 L + 10 R shuffled
+const V2_SOFT = 20;      // soft taps, 10 L + 10 R shuffled
+const V2_NEG_N = 6;      // repeats of each non-click motion
+const NEG_PAUSE_S = 1.5;
+const NEG_MOTIONS: { section: string; seconds: number; text: string }[] = [
+  { section: 'lift', seconds: 2, text: 'LIFT the whole hand about 5 cm and put it back down' },
+  { section: 'slide', seconds: 1, text: 'SLIDE the hand about 10 cm across the desk' },
+  { section: 'rotate', seconds: 2, text: 'ROTATE the wrist (roll left and right), no tap' },
+  { section: 'palm', seconds: 1, text: 'Tap the desk once with the PALM (heel of the hand)' },
+  { section: 'thumb', seconds: 1, text: 'Tap the desk once with the THUMB' },
+  { section: 'otherfinger', seconds: 1, text: 'Tap the desk once with the MIDDLE or RING finger' },
+];
+
+function shuffledSides(n: number, seed: number): ('L' | 'R')[] {
+  const order: ('L' | 'R')[] = [...Array(n / 2).fill('L'), ...Array(n / 2).fill('R')];
+  const rnd = seededRandom(seed);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
+
+function negSection(m: { section: string; seconds: number; text: string }): GuideStep[] {
+  const out: GuideStep[] = [];
+  for (let k = 1; k <= V2_NEG_N; k++) {
+    out.push(step({ kind: 'neg', section: m.section, seconds: m.seconds, n: k, of: V2_NEG_N, text: m.text }));
+    out.push(step({ kind: 'pause', section: m.section, seconds: NEG_PAUSE_S, n: k, of: V2_NEG_N, text: 'Relax, hand still' }));
+  }
+  return out;
+}
+
+function clicks2Steps(): GuideStep[] {
+  const soft = (steps: GuideStep[]): GuideStep[] =>
+    steps.map(s => (s.kind === 'click' ? { ...s, text: `SOFT ${CLICK_TEXT[s.click as 'L' | 'R']}` } : s));
+  return [
+    step({ kind: 'still', section: 'start', seconds: 5, text: 'Rest your hand still' }),
+    ...clickSection('firm', shuffledSides(V2_FIRM, 11)),
+    ...soft(clickSection('soft', shuffledSides(V2_SOFT, 12))),
+    ...NEG_MOTIONS.flatMap(negSection),
+    step({ kind: 'still', section: 'rest', seconds: 8, text: 'Rest your hand still' }),
+    step({ kind: 'still', section: 'end', seconds: 5, text: 'Hold still — finishing' }),
+  ];
+}
+
 export const GUIDE_SCRIPTS: Record<ScriptId, GuideScript> = {
   panning: makeScript('panning', 'Panning (L/R, 4 speeds)',
     `# guide: panning v1, 10 cm, moves ${SPEEDS.map(s => `${s.name} ${s.move}`).join('/')} s, pause ${PAUSE_S} s, rest ${REST_S} s`,
@@ -158,6 +209,9 @@ export const GUIDE_SCRIPTS: Record<ScriptId, GuideScript> = {
   clicks: makeScript('clicks', 'Clicks (index = left, pinky = right)',
     `# guide: clicks v1, hand still on the paper, tap ${CLICK_S} s, pause ${CLICK_PAUSE_S} s, rest ${REST_S} s, left ${CLICKS_PER_SECTION} L, right ${CLICKS_PER_SECTION} R, mixed ${MIXED_CLICKS / 2} L + ${MIXED_CLICKS / 2} R shuffled (seed 1)`,
     clicksSteps()),
+  clicks2: makeScript('clicks2', 'Clicks v2 (firm + soft taps, non-click motions)',
+    `# guide: clicks v2, hand still on the paper, tap ${CLICK_S} s, pause ${CLICK_PAUSE_S} s, firm ${V2_FIRM} shuffled (seed 11), soft ${V2_SOFT} shuffled (seed 12), then non-click motions ${NEG_MOTIONS.map(m => m.section).join('/')} x${V2_NEG_N} labelled guide_step neg, rest 8 s`,
+    clicks2Steps()),
 };
 
 /** Index of the step active at `relMs` after the countdown ended, or -1 outside the script. */
@@ -207,14 +261,14 @@ interface View {
 function panelOf(s: GuideStep): View['panel'] {
   if (s.kind === 'click') return s.click === 'L' ? 'clickL' : 'clickR';
   if (s.kind === 'move') return 'move';
-  if (s.kind === 'tilt') return 'tilt';
+  if (s.kind === 'tilt' || s.kind === 'neg') return 'tilt';
   return 'pause';
 }
 
 function headLabel(s: GuideStep): string {
   const sec = s.section.toUpperCase();
   const unit = s.unit;
-  if (s.kind === 'move' || s.kind === 'click') return `${sec} · ${unit} ${s.n} / ${s.of}`;
+  if (s.kind === 'move' || s.kind === 'click' || s.kind === 'neg') return `${sec} · ${s.kind === 'neg' ? 'no tap' : unit} ${s.n} / ${s.of}`;
   if (s.kind === 'pause') return `${sec} · pause after ${unit} ${s.n} / ${s.of}`;
   if (s.kind === 'still' && s.section !== 'start' && s.section !== 'end') return `${sec} · rest`;
   return sec;
@@ -237,6 +291,7 @@ function beep(ctx: AudioContext, dest: AudioNode, at: number, freq: number, ms: 
 /** Pitch of the beep at the start of a step: high for panning moves, L/R pitches for clicks, low otherwise. */
 function beepFreq(s: GuideStep): number {
   if (s.kind === 'click') return s.click === 'L' ? 990 : 660;
+  if (s.kind === 'neg') return 523;
   return s.kind === 'move' ? 880 : 440;
 }
 
@@ -367,7 +422,7 @@ export class PanningGuide {
     r.timers.forEach(t => clearTimeout(t));
     r.master?.disconnect(); // drops any beeps still queued for this run
     this.overlay.classList.add('hidden');
-    this.btn.textContent = '▶ Start guided recording';
+    this.btn.textContent = 'Start guided';
     this.btn.classList.remove('recording');
     this.btn.disabled = !this.available;
     this.select.disabled = false;
@@ -402,7 +457,7 @@ export class PanningGuide {
     this.show({
       panel: panelOf(s),
       head: headLabel(s),
-      text: isClick ? CLICK_BIG[s.click as 'L' | 'R'] : s.text,
+      text: isClick ? `${s.section === 'soft' ? 'SOFT · ' : ''}${CLICK_BIG[s.click as 'L' | 'R']}` : s.text,
       time: (stepMs - inStep) / 1000,
       next: `Next: ${i + 1 < sc.steps.length ? sc.steps[i + 1].text : 'end of script'}`,
       pace: s.kind === 'move' ? (s.dir > 0 ? p : 1 - p) : null,

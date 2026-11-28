@@ -1,4 +1,5 @@
 import './style.css';
+import { addInfo, initInfo } from './info.ts';
 import { APP_PIPELINE_CONFIG, DEFAULT_PIPELINE_CONFIG, PIPELINE_STEPS } from '../../../algorithms/config.ts';
 import type { FusionMode, MotionModel, PipelineConfig, StepKey, ClassifierKind } from '../../../algorithms/config.ts';
 import type { StrokePhase } from '../../../algorithms/motion/stroke.ts';
@@ -331,9 +332,42 @@ function stopAndSave(aborted: boolean): void {
 function updateRecordButton(): void {
   const b = $('btnRecord');
   b.classList.toggle('recording', sessionRec.recording);
-  b.textContent = sessionRec.recording ? `■ Stop & save · ${(sessionRec.rows / P().sampleRateHz).toFixed(0)} s` : '● Record';
+  const sec = Math.floor(sessionRec.rows / P().sampleRateHz);
+  const clock = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+  b.textContent = `● ${clock} Stop`;
+  b.classList.toggle('hidden', !sessionRec.recording);
+  const tool = $('recToolBtn');
+  tool.classList.toggle('recording', sessionRec.recording);
+  const title = sessionRec.recording ? 'Stop & save' : 'Recorder';
+  const sub = sessionRec.recording ? `● ${clock} recording` : 'Free or guided session';
+  if ($('recTitle').textContent !== title) $('recTitle').textContent = title;
+  if ($('recSub').textContent !== sub) $('recSub').textContent = sub;
+}
+// one Record button: while recording it stops & saves; otherwise it opens the mode panel (Free | Guided)
+const recPanel = $('recPanel');
+function closeRecPanel(): void { recPanel.classList.add('hidden'); $('recToolBtn').setAttribute('aria-expanded', 'false'); }
+function openRecPanel(): void {
+  recPanel.classList.remove('hidden');
+  $('recToolBtn').setAttribute('aria-expanded', 'true');
+  const r = recPanel.getBoundingClientRect();
+  const shift = Math.min(0, window.innerWidth - 8 - r.right);
+  recPanel.style.left = `${Math.max(shift, 8 - r.left + parseFloat(recPanel.style.left || '0'))}px`;
+}
+function syncRecMode(): void {
+  const guidedMode = $<HTMLInputElement>('recModeGuided').checked;
+  $('recFree').classList.toggle('hidden', guidedMode);
+  $('recGuided').classList.toggle('hidden', !guidedMode);
 }
 $('btnRecord').addEventListener('click', () => toggleRecording());
+$('recToolBtn').addEventListener('click', () => {
+  if (sessionRec.recording) { toggleRecording(); return; }
+  if (recPanel.classList.contains('hidden')) openRecPanel(); else closeRecPanel();
+});
+document.querySelectorAll<HTMLInputElement>('input[name=recMode]').forEach(r => r.addEventListener('change', syncRecMode));
+$('recStartFree').addEventListener('click', () => { closeRecPanel(); toggleRecording(); });
+$('guideBtn').addEventListener('click', () => closeRecPanel());
+document.addEventListener('click', e => { const t = e.target as HTMLElement; if (!t.closest('.recwrap') && !t.closest('#infoPop')) closeRecPanel(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRecPanel(); });
 
 $<HTMLInputElement>('chkDebug').addEventListener('change', () => { /* read every frame */ });
 $('btnTheme').addEventListener('click', () => {
@@ -367,6 +401,7 @@ for (const st of PIPELINE_STEPS) {
     if (st.key === 'enableCalibration') recalibrate();
   });
   lab.append(document.createTextNode(st.label), cb);
+  addInfo(lab, `step.${st.key}`);
   toggleHost.appendChild(lab);
   stepChecks.push(cb);
 }
@@ -380,23 +415,25 @@ for (const st of PIPELINE_STEPS) {
   // switching modes recalibrates, so the new mode starts from a fresh gravity / orientation estimate
   sel.addEventListener('change', () => { P().fusionMode = sel.value as FusionMode; recalibrate(); });
   lab.append(document.createTextNode('Fusion mode'), sel);
+  addInfo(lab, 'fusionMode');
   const labM = document.createElement('label');
   const selM = document.createElement('select');
   selM.innerHTML = '<option value="stroke">Stroke tracker (push → brake → halt)</option><option value="integrate">Plain double integration</option><option value="segment">Stroke + rest-to-rest correction (gyro mode)</option>';
   selM.id = 'motionModel';
   selM.value = P().motionModel;
-  selM.title = 'How acceleration becomes cursor motion. Stroke tracker: a stroke starts in the direction of the first push, ' +
-    'only braking along that direction counts once the hand slows down, and velocity is set to exactly 0 when the braking is over.';
   selM.addEventListener('change', () => { P().motionModel = selM.value as MotionModel; session.pipe.stroke.reset(); });
   labM.append(document.createTextNode('Motion model'), selM);
+  addInfo(labM, 'motionModel');
   const lab2 = document.createElement('label');
   const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = P().adaptiveBeta;
   cb.addEventListener('change', () => { P().adaptiveBeta = cb.checked; });
-  lab2.append(document.createTextNode('Adaptive β (trust accel when still)'), cb);
+  lab2.append(document.createTextNode('Adaptive β'), cb);
+  addInfo(lab2, 'adaptiveBeta');
   const lab3 = document.createElement('label');
   const cb3 = document.createElement('input'); cb3.type = 'checkbox'; cb3.checked = P().biasTracking;
   cb3.addEventListener('change', () => { P().biasTracking = cb3.checked; });
-  lab3.append(document.createTextNode('Gyro bias tracking while still'), cb3);
+  lab3.append(document.createTextNode('Gyro bias tracking'), cb3);
+  addInfo(lab3, 'biasTracking');
   toggleHost.append(lab, labM, lab2, lab3);
 }
 
@@ -804,20 +841,26 @@ $('rpTrain').addEventListener('click', () => {
 
 // ───────────────────────── live IMU (ESP32 over USB serial) ─────────────────────────
 
+/** Short one-line status under the Connect row; err styles it as an error. */
+function liveMsg(msg: string, err = false): void {
+  const el = $('liveInfo');
+  el.textContent = msg;
+  el.classList.toggle('err', err);
+}
+
 const RATE_PROBE_N = 16; // readings used to measure the board's sample rate before the pipeline starts
 
 async function startLive(port?: WebSerialPort): Promise<void> {
   if (link.connected) return;
-  const info = $('liveInfo');
-  info.textContent = 'Connecting…';
+  liveMsg('Connecting…');
   try {
     await link.connect(port);
   } catch (err) {
     const e = err as Error;
-    info.textContent = e.name === 'NotFoundError' ? 'No port selected.'
+    liveMsg(e.name === 'NotFoundError' ? 'No port selected.'
       : e.name === 'InvalidStateError' || e.name === 'NetworkError'
-        ? 'Could not open the port. Close anything else using it (e.g. the PlatformIO serial monitor) and try again.'
-        : `Could not connect: ${e.message}`;
+        ? 'Port busy — close other serial apps'
+        : `Could not connect: ${e.message}`, e.name !== 'NotFoundError');
     updateLiveButtons();
     return;
   }
@@ -830,7 +873,7 @@ async function startLive(port?: WebSerialPort): Promise<void> {
   live.tracker.onRecord = r => onTapRecord(r, live?.lastT ?? 0);
   session.pipe.reset();
   wasRunning = false; lastSampleT = null;
-  info.textContent = 'Connected. Waiting for readings…';
+  liveMsg('Connected. Waiting for readings…');
   updateLiveButtons();
   selectTab('live');
 }
@@ -864,13 +907,12 @@ function liveFrame(): void {
 
 function showLiveInfo(): void {
   if (!live?.rateHz) return;
-  let msg = `Receiving ≈${live.rateHz} Hz from the ESP32. Press R to recalibrate (keep the IMU still).`;
-  if (live.rateHz < 2.5 * P().tapHighpassHz) {
-    msg += ` The pipeline is tuned for 1 kHz, so at this rate motion is coarse and tap detection is unreliable (untick "9. Tap detection" if hand motion triggers clicks).`;
-  }
-  // data health: anything non-zero means readings were lost or damaged on the way
-  msg += ` Data: ${link.received.toLocaleString()} readings, ${link.badLines} garbled lines, ${link.serialErrors} receive errors, ${link.sensorNotes} sensor warnings${link.lastSensorNote ? ` (last: "${link.lastSensorNote}")` : ''}.`;
-  $('liveInfo').textContent = msg;
+  const bad = link.badLines + link.serialErrors;
+  const parts = [`≈${live.rateHz} Hz`];
+  if (live.rateHz < 2.5 * P().tapHighpassHz) parts.push('low rate');
+  if (bad) parts.push(`${bad} bad lines`);
+  if (link.sensorNotes) parts.push(`${link.sensorNotes} sensor warnings`);
+  liveMsg(`Receiving ${parts.join(' · ')}`, bad > 0);
 }
 
 /** Leaves live mode (without closing the port) and goes back to the simulator. */
@@ -899,13 +941,16 @@ function updateLiveButtons(): void {
   $<HTMLButtonElement>('liveConnect').disabled = !SerialImuLink.supported || link.connected;
   $<HTMLButtonElement>('liveStop').disabled = !link.connected;
   guide.setAvailable(link.connected);
+  $<HTMLInputElement>('recModeGuided').disabled = !link.connected;
+  $('recWhy').classList.toggle('hidden', link.connected);
+  if (!link.connected && $<HTMLInputElement>('recModeGuided').checked) { $<HTMLInputElement>('recModeFree').checked = true; syncRecMode(); }
   clickTest.setAvailable(link.connected);
 }
 
 link.onClose = err => {
   leaveLive();
   updateLiveButtons();
-  $('liveInfo').textContent = err ? `Disconnected: ${err.replace(/\.$/, '')}. Back on the simulation.` : 'Disconnected. Back on the simulation.';
+  liveMsg(err ? `Disconnected: ${err.replace(/\.$/, '')}` : 'Disconnected');
 };
 $('liveConnect').addEventListener('click', () => { void startLive(); });
 $('liveStop').addEventListener('click', stopLiveInput);
@@ -1040,8 +1085,9 @@ function updateAccelCalButton(): void {
   const b = $<HTMLButtonElement>('accelCalBtn');
   const streaming = source === 'live' && !!live?.rateHz && performance.now() - link.lastDataAt < 1000;
   b.disabled = !accelCal && !streaming;
-  const label = accelCal ? 'Cancel calibration' : 'Calibrate accelerometer (6 faces)';
-  if (b.textContent !== label) b.textContent = label;
+  const label = accelCal ? 'Cancel calibration' : 'Accel calibration';
+  const t = $('accelCalTitle');
+  if (t.textContent !== label) t.textContent = label;
 }
 
 $('accelCalBtn').addEventListener('click', () => { if (accelCal) accelCalCancel(); else accelCalStart(); });
@@ -1303,11 +1349,12 @@ showOffsets();
 autoTrain();
 updateLiveButtons();
 if (!SerialImuLink.supported) {
-  $('liveInfo').textContent = 'Live input needs Chrome or Edge (Web Serial). Running the simulation.';
+  liveMsg('Needs Chrome or Edge');
 } else {
   // a board this page was already allowed to use becomes the input straight away
   void SerialImuLink.rememberedPort().then(p => { if (p) void startLive(p); });
 }
+initInfo();
 requestAnimationFrame(t => { lastNow = t; requestAnimationFrame(rafLoop); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { invalidateTheme(); $('plotLegend').innerHTML = plotView.legendHTML(); });
 // expose for debugging / scripted demos in the console
