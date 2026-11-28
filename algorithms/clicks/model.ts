@@ -3,14 +3,23 @@
 import type { ClickModel } from './detector.ts';
 
 /**
- * Logistic regression on 5 raw features from the streaming detector.
- * P(L) = sigmoid(bias + sum_q weights[q] * (x[q] - mean[q]) / std[q]); L = index (left), R = pinky (right).
+ * tap:  logistic regression (tap vs not a tap) on 6 features of a candidate peak; a tap when score >= threshold.
+ * side: linear discriminant on lpk and lfshare; L = index (left click), R = pinky (right click).
  */
 export const CLICK_MODEL: ClickModel | null = {
-  features: ["peak_acc30","max_ay","p2p_ay","peak_acc5","max_ax"],
-  mean: [0.2053782, 0.1658665, 0.2534561, 0.2929953, 0.1358173],
-  std: [0.1216256, 0.1073195, 0.1327462, 0.1602447, 0.1072849],
-  weights: [0.8658952, 1.069196, 0.3679805, 0.4245184, 1.706],
-  bias: 1.198861,
-  trainedOn: ["clicks_take01_2026-11-27_13-58-32","clicks_take02_2026-11-27_14-05-43"],
+  tap: {
+    features: ["lratio","lhw","lpost150","prelf1s","lpre1s","lpk"],
+    mean: [2.137128, 1.334209, -2.354148, -3.061208, 2.695504, -1.165972],
+    std: [0.9153408, 0.8342542, 0.8835844, 1.044292, 1.166057, 0.7799408],
+    weights: [0.0494335, 0.6407615, -0.8823451, -0.7029633, 0.2917661, -0.9035618],
+    bias: -0.5705469,
+    threshold: -0.0263063,
+  },
+  side: {
+    features: ["lpk","lfshare"],
+    muL: [-0.9901641, 0.2262585],
+    muR: [-2.05808, 0.2371944],
+    cov: [0.1070679, -0.01054347, -0.01054347, 0.01489753],
+  },
+  trainedOn: ["clicks2_take01_2026-11-27_18-53-10","clicks_take01_2026-11-27_13-58-32","clicks_take02_2026-11-27_14-05-43","panning_take01_2026-11-27_13-52-33","panning_take02_2026-11-27_13-55-28"],
 };
